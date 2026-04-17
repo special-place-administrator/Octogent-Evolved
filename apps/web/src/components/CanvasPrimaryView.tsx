@@ -68,7 +68,10 @@ type CanvasPrimaryViewProps = {
   onCanvasOpenTerminalIdsChange?: (ids: string[]) => void;
   onCanvasOpenTentacleIdsChange?: (ids: string[]) => void;
   onCanvasTerminalsPanelWidthChange?: (width: number | null) => void;
-  onCreateAgent?: (tentacleId: string) => Promise<string | undefined> | undefined;
+  onCreateAgent?: (
+    tentacleId: string,
+    workspaceMode?: TerminalWorkspaceMode,
+  ) => Promise<string | undefined> | undefined;
   onCreateTerminal?: () => Promise<string | undefined> | undefined;
   onCreateWorktreeTerminal?: () => Promise<string | undefined> | undefined;
   onCreateTentacle?: () => void;
@@ -722,10 +725,10 @@ export const CanvasPrimaryView = ({
   }, [svgRef]);
 
   const handleCreateAgent = useCallback(
-    (tentacleId: string) => {
+    (tentacleId: string, workspaceMode?: TerminalWorkspaceMode) => {
       if (!onCreateAgent) return;
       setContextMenu(null);
-      const result = onCreateAgent(tentacleId);
+      const result = onCreateAgent(tentacleId, workspaceMode);
       if (result && typeof result.then === "function") {
         void result.then((agentId) => {
           if (agentId) setPendingOpenAgentId(agentId);
@@ -1217,8 +1220,8 @@ export const CanvasPrimaryView = ({
                 sessions={sessionsByTentacleId.get(node.tentacleId) ?? []}
                 onClose={() => handleCloseTentacle(nodeId)}
                 onFocus={() => setSelectedNodeId(nodeId)}
-                onCreateAgent={(tentacleId) => {
-                  handleCreateAgent(tentacleId);
+                onCreateAgent={(tentacleId, workspaceMode) => {
+                  handleCreateAgent(tentacleId, workspaceMode);
                 }}
                 onSolveTodoItem={(tentacleId, itemIndex) => {
                   void onSolveTodoItem?.(tentacleId, itemIndex);
@@ -1371,7 +1374,7 @@ export const CanvasPrimaryView = ({
                 <button
                   type="button"
                   className="canvas-context-menu-item"
-                  onClick={() => handleCreateAgent(contextMenu.tentacleId)}
+                  onClick={() => handleCreateAgent(contextMenu.tentacleId, "shared")}
                 >
                   <span className="canvas-context-menu-icon">
                     <TerminalIcon size={14} />
@@ -1381,20 +1384,12 @@ export const CanvasPrimaryView = ({
                 <button
                   type="button"
                   className="canvas-context-menu-item"
-                  onClick={() => {
-                    setContextMenu(null);
-                    const result = onCreateWorktreeTerminal?.();
-                    if (result && typeof result.then === "function") {
-                      void result.then((agentId) => {
-                        if (agentId) setPendingOpenAgentId(agentId);
-                      });
-                    }
-                  }}
+                  onClick={() => handleCreateAgent(contextMenu.tentacleId, "worktree")}
                 >
                   <span className="canvas-context-menu-icon">
                     <GitBranch size={14} />
                   </span>
-                  New Worktree Terminal
+                  Create new agent (worktree)
                 </button>
                 <button
                   type="button"

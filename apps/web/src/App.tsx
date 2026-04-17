@@ -546,8 +546,8 @@ export const App = () => {
               onCanvasOpenTerminalIdsChange: setCanvasOpenTerminalIds,
               onCanvasOpenTentacleIdsChange: setCanvasOpenTentacleIds,
               onCanvasTerminalsPanelWidthChange: setCanvasTerminalsPanelWidth,
-              onCreateAgent: async (tentacleId) => {
-                return await createTerminal("shared", undefined, tentacleId);
+              onCreateAgent: async (tentacleId, workspaceMode) => {
+                return await createTerminal(workspaceMode ?? "shared", undefined, tentacleId);
               },
               onCreateTerminal: async () => {
                 return await createTerminal("shared", undefined, OCTOBOSS_ID);

@@ -78,7 +78,9 @@ type CanvasTentaclePanelProps = {
   panelRef?: Ref<HTMLDivElement> | undefined;
   tentacle: DeckTentacleSummary | null;
   sessions: ConversationSessionSummary[];
-  onCreateAgent?: ((tentacleId: string) => void) | undefined;
+  onCreateAgent?:
+    | ((tentacleId: string, workspaceMode?: TentacleWorkspaceMode) => void)
+    | undefined;
   onSolveTodoItem?: ((tentacleId: string, itemIndex: number) => void) | undefined;
   onSpawnSwarm?: ((tentacleId: string, workspaceMode: TentacleWorkspaceMode) => void) | undefined;
   onNavigateToConversation?: ((sessionId: string) => void) | undefined;
@@ -291,9 +293,16 @@ export const CanvasTentaclePanel = ({
             <button
               type="button"
               className="detail-action-btn"
-              onClick={() => onCreateAgent?.(node.tentacleId)}
+              onClick={() => onCreateAgent?.(node.tentacleId, "shared")}
             >
               &gt;_ Create Agent
+            </button>
+            <button
+              type="button"
+              className="detail-action-btn"
+              onClick={() => onCreateAgent?.(node.tentacleId, "worktree")}
+            >
+              &gt;_ Create Agent (Worktree)
             </button>
             <button
               type="button"
