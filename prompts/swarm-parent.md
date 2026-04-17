@@ -50,17 +50,26 @@ while not all-merged:
 
 ### Timing constraints (read carefully — the runtime enforces these)
 
-1. **Per-poll-cycle cap: 5 minutes.** Not 10. Not 20. If a poll cycle hits 5 min without merge-readiness on at least one branch, exit the loop and surface status to the operator (what committed, what's still silent, what's dirty). Do not extend the cap just because workers seem close.
-2. **Cadence between checks: ~30 seconds.** Use a bounded while-loop pattern; do NOT use a bare leading `sleep N` command — the runtime blocks it. Sanctioned shape:
+1. **Pick a per-poll-cycle cap based on task size.** Before your first poll, estimate how long workers realistically need and pick ONE of these three tiers. Document your choice in a single sentence before starting the loop ("picking Nmin cap because X").
+
+   | Tier  | When to pick                                                              |
+   |-------|---------------------------------------------------------------------------|
+   | 2 min | Trivial work. One todo per worker, purely additive, no refactor, small files. |
+   | 5 min | Typical. One to two todos per worker, standard edits, tests included.          |
+   | 10 min| Heavy. Multi-file refactor, new abstraction/trait, cross-cutting change.       |
+
+   Look at `{{workerListing}}` and the corresponding CONTEXT.md / todo.md entries to make the call. Err toward 2 min if it's ambiguous — you can always extend for the next cycle. Do not pick caps outside this set (no 7, no 15).
+2. **Cadence between checks: ~30 seconds.** Use a bounded while-loop pattern; do NOT use a bare leading `sleep N` command — the runtime blocks it. Sanctioned shape (substitute your chosen cap in seconds):
    ```bash
-   end=$(($(date +%s) + 300)); while [ $(date +%s) -lt $end ]; do
+   end=$(($(date +%s) + <CAP_IN_SECONDS>)); while [ $(date +%s) -lt $end ]; do
      # do a check; break on any branch activity
      sleep 30
    done
    ```
    Or equivalently `until <check>; do sleep 2; done` when waiting for a single specific condition.
 3. **Run the poll in background** (`run_in_background: true`) when the cycle is >60s so you can still respond to operator input.
-4. **On first branch delta, exit the poll and act immediately** — review the diff, merge if clean, start the next cycle for the remaining workers. Don't wait out the full 5 min if you have a ready branch in hand.
+4. **On first branch delta, exit the poll and act immediately** — review the diff, merge if clean, start the next cycle for the remaining workers. Don't wait out the full cap if you have a ready branch in hand.
+5. **Re-pick the tier between cycles** if new information changes the estimate (e.g. the first worker finished in 90s — downgrade to 2 min for the remaining ones; the first worker is visibly grinding on an advisor consult — upgrade to 10 min).
 
 ## Reading worker reports from commits
 
