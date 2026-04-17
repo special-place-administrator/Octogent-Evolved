@@ -587,16 +587,27 @@ export const App = () => {
                 if (!response.ok) return;
                 await refreshColumns();
               },
-              onSpawnSwarm: async (tentacleId, workspaceMode) => {
+              onSpawnSwarm: async (tentacleId, workspaceMode, maxWorkers) => {
+                const body: Record<string, unknown> = { workspaceMode };
+                if (typeof maxWorkers === "number" && maxWorkers > 0) {
+                  body.maxWorkers = Math.floor(maxWorkers);
+                }
                 const response = await fetch(
                   `/api/deck/tentacles/${encodeURIComponent(tentacleId)}/swarm`,
                   {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ workspaceMode }),
+                    body: JSON.stringify(body),
                   },
                 );
-                if (!response.ok) return;
+                if (!response.ok) {
+                  const errorBody = await response.text().catch(() => response.statusText);
+                  console.error(
+                    `Failed to spawn swarm for tentacle ${tentacleId}: ${response.status} ${errorBody}`,
+                  );
+                  return;
+                }
+                await refreshColumns();
               },
               onOctobossAction: async (action) => {
                 const response = await fetch("/api/terminals", {

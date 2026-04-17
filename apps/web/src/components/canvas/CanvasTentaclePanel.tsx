@@ -82,7 +82,13 @@ type CanvasTentaclePanelProps = {
     | ((tentacleId: string, workspaceMode?: TentacleWorkspaceMode) => void)
     | undefined;
   onSolveTodoItem?: ((tentacleId: string, itemIndex: number) => void) | undefined;
-  onSpawnSwarm?: ((tentacleId: string, workspaceMode: TentacleWorkspaceMode) => void) | undefined;
+  onSpawnSwarm?:
+    | ((
+        tentacleId: string,
+        workspaceMode: TentacleWorkspaceMode,
+        maxWorkers?: number,
+      ) => void)
+    | undefined;
   onNavigateToConversation?: ((sessionId: string) => void) | undefined;
   onRefreshTentacleData?: (() => Promise<void>) | undefined;
 };
@@ -128,6 +134,7 @@ export const CanvasTentaclePanel = ({
   const [addingTodo, setAddingTodo] = useState(false);
   const [addText, setAddText] = useState("");
   const [solvingTodoIndex, setSolvingTodoIndex] = useState<number | null>(null);
+  const [swarmWorkerCount, setSwarmWorkerCount] = useState<number>(3);
   const refreshTentacleData = useCallback(async () => {
     await onRefreshTentacleData?.();
   }, [onRefreshTentacleData]);
@@ -304,17 +311,51 @@ export const CanvasTentaclePanel = ({
             >
               &gt;_ Create Agent (Worktree)
             </button>
+            <div
+              className="detail-action-btn"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                cursor: "default",
+                padding: "4px 8px",
+              }}
+            >
+              <span>Workers:</span>
+              <input
+                type="number"
+                min={1}
+                max={9}
+                value={swarmWorkerCount}
+                onChange={(e) => {
+                  const parsed = Number.parseInt(e.target.value, 10);
+                  if (Number.isInteger(parsed)) {
+                    setSwarmWorkerCount(Math.min(9, Math.max(1, parsed)));
+                  }
+                }}
+                style={{
+                  width: "48px",
+                  background: "transparent",
+                  border: "1px solid currentColor",
+                  color: "inherit",
+                  padding: "2px 4px",
+                  fontFamily: "inherit",
+                  fontSize: "inherit",
+                }}
+                aria-label="Number of swarm workers to spawn (1-9)"
+              />
+            </div>
             <button
               type="button"
               className="detail-action-btn"
-              onClick={() => onSpawnSwarm?.(node.tentacleId, "worktree")}
+              onClick={() => onSpawnSwarm?.(node.tentacleId, "worktree", swarmWorkerCount)}
             >
               &#x2263; Spawn Swarm (Worktrees)
             </button>
             <button
               type="button"
               className="detail-action-btn"
-              onClick={() => onSpawnSwarm?.(node.tentacleId, "shared")}
+              onClick={() => onSpawnSwarm?.(node.tentacleId, "shared", swarmWorkerCount)}
             >
               &#x2263; Spawn Swarm (Normal)
             </button>

@@ -75,7 +75,11 @@ type CanvasPrimaryViewProps = {
   onCreateTerminal?: () => Promise<string | undefined> | undefined;
   onCreateWorktreeTerminal?: () => Promise<string | undefined> | undefined;
   onCreateTentacle?: () => void;
-  onSpawnSwarm?: (tentacleId: string, workspaceMode: TerminalWorkspaceMode) => Promise<void>;
+  onSpawnSwarm?: (
+    tentacleId: string,
+    workspaceMode: TerminalWorkspaceMode,
+    maxWorkers?: number,
+  ) => Promise<void>;
   onSolveTodoItem?: (tentacleId: string, itemIndex: number) => Promise<void> | void;
   onOctobossAction?: (action: string) => Promise<string | undefined> | undefined;
   onTentacleAction?: (
@@ -739,9 +743,9 @@ export const CanvasPrimaryView = ({
   );
 
   const handleSpawnSwarm = useCallback(
-    (tentacleId: string, workspaceMode: TerminalWorkspaceMode) => {
+    (tentacleId: string, workspaceMode: TerminalWorkspaceMode, maxWorkers?: number) => {
       setContextMenu(null);
-      void onSpawnSwarm?.(tentacleId, workspaceMode);
+      void onSpawnSwarm?.(tentacleId, workspaceMode, maxWorkers);
     },
     [onSpawnSwarm],
   );
@@ -1226,8 +1230,8 @@ export const CanvasPrimaryView = ({
                 onSolveTodoItem={(tentacleId, itemIndex) => {
                   void onSolveTodoItem?.(tentacleId, itemIndex);
                 }}
-                onSpawnSwarm={(tentacleId, workspaceMode) => {
-                  handleSpawnSwarm(tentacleId, workspaceMode);
+                onSpawnSwarm={(tentacleId, workspaceMode, maxWorkers) => {
+                  handleSpawnSwarm(tentacleId, workspaceMode, maxWorkers);
                 }}
                 onNavigateToConversation={onNavigateToConversation}
                 onRefreshTentacleData={refreshDeckTentacles}

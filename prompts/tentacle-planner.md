@@ -168,6 +168,26 @@ Run from the project root:
    - Items within a tentacle must **not overlap files**. If two items would edit the same file, merge them into one item.
    - Items must be grounded in **observed reality** — missing tests you saw, TODOs you read, stale docs you identified. Not generic best-practices.
    - Order by priority (highest first).
+   - **Format — MANDATORY**: every item MUST be a top-level `- [ ]` markdown checkbox bullet. Octogent's `parseTodoProgress` parser matches exactly `^- \[ \]` / `^- \[x\]` — heading-only formats like `## 1. Title` are invisible to the parser and will break `search_files`/swarm endpoints that read the todo list. Use this exact shape:
+
+     ```markdown
+     ## 1. <Short heading — mirrors the todo's one-line summary>
+
+     - [ ] <One-line summary of the deliverable — same text as the heading is fine.>
+
+     **Why**: ... context ...
+
+     **What**:
+     - detail bullet 1 (plain `-`, NOT `- [ ]`)
+     - detail bullet 2
+     - ...
+
+     **Verify**:
+     - `cmd 1`
+     - `cmd 2`
+     ```
+
+     The `- [ ]` bullet at the top of each section is what the parser sees as a todo item. Detail bullets under **What** use plain `-` (no checkbox) so they don't inflate the todo count. Multiple `- [ ]` bullets within one section are allowed but only if they represent genuinely separable sub-tasks that a worker could pick independently.
 
 **Do not ask for per-tentacle confirmation here.** The user approved the layout in CHECKPOINT 1; you are executing that approval. Run silently through all tentacles.
 
