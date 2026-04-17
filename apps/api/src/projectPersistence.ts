@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join, parse as parsePath } from "node:path";
 
 export const GLOBAL_OCTOGENT_DIR = join(homedir(), ".octogent");
 export const PROJECTS_FILE = join(GLOBAL_OCTOGENT_DIR, "projects.json");
@@ -179,6 +179,28 @@ export const loadProjectConfig = (workspaceCwd: string): ProjectConfigDocument |
   }
 
   return toProjectConfigDocument(readJsonFile(configPath));
+};
+
+// Walks up from `cwd` looking for an octogent project config. Returns the
+// workspace root that owns the config, or null if none is found before
+// reaching the filesystem root. Used by the CLI so commands invoked from
+// inside a worktree (or any subdirectory) still find the owning project.
+export const findProjectWorkspaceRoot = (cwd: string): string | null => {
+  const rootPath = parsePath(cwd).root;
+  let current = cwd;
+  while (true) {
+    if (existsSync(join(current, PROJECT_CONFIG_RELATIVE_PATH))) {
+      return current;
+    }
+    if (current === rootPath) {
+      return null;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
 };
 
 export const ensureProjectConfig = (
