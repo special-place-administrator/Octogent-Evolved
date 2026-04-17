@@ -12,7 +12,15 @@ A worker branch is ready to merge when ALL of the following are true:
 
 You do not need any additional confirmation. A committed branch that meets the three conditions above IS the DONE signal.
 
-Channel messages are **advisory only**. Read them if present (`octogent channel list {{terminalId}}`), but never gate a merge decision on them.
+### `ahead=0` is NOT a completion signal
+
+If a worker branch shows `ahead=0`, the worker has **not committed yet** — it's either still running or hasn't started. Keep polling.
+
+Do **not** interpret the tip-commit message when `ahead=0`. That commit came from the base branch (main's history), not this worker. A message like "merge xxx-swarm-N: ..." on the tip of a branch with `ahead=0` is evidence of a **prior** merge into main, not this run's worker finishing. Never mark a worker as "already done" based on the content of a commit it didn't author.
+
+### Channel messages are advisory
+
+Read them if present (`octogent channel list {{terminalId}}`), but never gate a merge decision on them.
 
 ## Your role
 
@@ -73,13 +81,24 @@ while not all-merged:
 
 ## Reading worker reports from commits
 
-Workers write their status into commit messages. Read with:
+Workers write their status into commit messages. Read the full message with:
 
 ```bash
 git log -1 --format=%B octogent/<worker-terminal-id>
 ```
 
-A completed commit may follow the conventional-commits pattern (e.g. `feat(tentacle#N): ...`) or include a `DONE:` line. A blocked commit will include a `BLOCKED:` line describing what failed and what's needed to unblock.
+The contract with workers: **the final commit on their branch carries one of two structured markers in the body**.
+
+- `DONE: <one-line summary>` — work is complete. Body below the marker describes verification run, file-by-file summary, caveats for the operator.
+- `BLOCKED: <one-line blocker>` — worker cannot proceed. Body below the marker describes what was tried, what failed, and the concrete question/option set the operator or coordinator must resolve.
+
+Grep for these markers:
+
+```bash
+git log -1 --format=%B octogent/<worker-id> | grep -E '^(DONE|BLOCKED):'
+```
+
+A missing marker means the worker either hasn't finished or didn't follow the contract — treat it as in-progress, keep polling. If `ahead>0` but no marker ever appears, escalate to the operator after the poll cap elapses.
 
 ## Worker workspaces
 

@@ -36,20 +36,42 @@ Scan `../../tentacles/{{tentacleId}}/todo.md`. Pick the highest-priority item th
 
    where `<type>` matches your repo's conventional-commit style (feat/fix/refactor/test/docs/chore) and `<todo-number>` is the 1-based index of the todo you completed. Example: `refactor(edit-and-ranker-hooks#2): introduce EditHook trait`.
 
+5. **The final commit MUST carry a `DONE:` or `BLOCKED:` marker in the body.** This is the signal the coordinator reads — channel messages can fail silently, commit bodies cannot. Use this exact shape:
+
+   ```
+   <conventional-commits subject>
+
+   DONE: <one-line summary of what landed>
+
+   Verification: <what you ran, what passed>
+   Files touched: <file-by-file summary>
+   Caveats: <follow-ups, gotchas for the operator — write "none" if none>
+   ```
+
+   Or, if the work is blocked:
+
+   ```
+   <conventional-commits subject — use `chore` type since no code changed>
+
+   BLOCKED: <one-line blocker description>
+
+   Tried: <what you attempted>
+   Failed: <the exact error / output / reason>
+   Needs: <the concrete decision or information you need>
+   ```
+
+   If you produced multiple commits on this branch (e.g. incremental work), only the FINAL commit needs the marker. The coordinator reads `git log -1 --format=%B` on your branch — that's what gates the merge decision.
+
 ## Tick the box
 
-Before reporting DONE, update `../../tentacles/{{tentacleId}}/todo.md`: change the leading `- [ ]` of the item you just completed to `- [x]`. This keeps the octogent UI progress indicator coherent with on-disk reality. If you can't find your item in the file (formatting drift), include the todo number in your DONE message so the operator can tick it manually.
+Before creating your final commit, update `../../tentacles/{{tentacleId}}/todo.md`: change the leading `- [ ]` of the item you just completed to `- [x]`. This keeps the octogent UI progress indicator coherent with on-disk reality. If you can't find your item in the file (formatting drift), include the todo number in your DONE marker so the operator can tick it manually.
 
-## Report DONE
+## Report DONE / BLOCKED
 
-Once the todo is committed AND the checkbox is ticked, report **DONE** with a one-line summary of what landed and the commit SHA. Then exit.
+Your final commit's body IS your DONE/BLOCKED report — the coordinator reads it directly from git (see step 5 above). You do not need to also send a channel message; channels are advisory and failure-prone.
 
-If you hit a blocker that needs the operator, report **BLOCKED** with:
+If you want to send a channel message as well (convenience for the operator watching the GUI), it's fine, but do not wait on its success — failures there are expected and harmless.
 
-- What you tried.
-- What failed (exact error / test output).
-- The concrete question or option set that would unblock you.
-
-"Stuck" or "need help" is not useful. State the specific decision or information you need.
+"Stuck" or "need help" is not useful. In a BLOCKED commit body, state the specific decision or information you need.
 
 Your terminal ID is `{{terminalId}}`. The local API is at `http://localhost:{{apiPort}}`.
