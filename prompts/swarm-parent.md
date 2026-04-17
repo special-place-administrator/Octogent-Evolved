@@ -46,10 +46,21 @@ while not all-merged:
     dirty=$(git -C .octogent/worktrees/<terminal-id> status --porcelain)
   if all worker branches are ahead and clean: proceed to merge
   if any branch has BLOCKED commit: investigate
-  sleep 30
 ```
 
-Use actual shell commands — do not simulate the loop; run it. Between polls, use `sleep 30` (or `timeout /t 30 /nobreak` on Windows).
+### Timing constraints (read carefully — the runtime enforces these)
+
+1. **Per-poll-cycle cap: 5 minutes.** Not 10. Not 20. If a poll cycle hits 5 min without merge-readiness on at least one branch, exit the loop and surface status to the operator (what committed, what's still silent, what's dirty). Do not extend the cap just because workers seem close.
+2. **Cadence between checks: ~30 seconds.** Use a bounded while-loop pattern; do NOT use a bare leading `sleep N` command — the runtime blocks it. Sanctioned shape:
+   ```bash
+   end=$(($(date +%s) + 300)); while [ $(date +%s) -lt $end ]; do
+     # do a check; break on any branch activity
+     sleep 30
+   done
+   ```
+   Or equivalently `until <check>; do sleep 2; done` when waiting for a single specific condition.
+3. **Run the poll in background** (`run_in_background: true`) when the cycle is >60s so you can still respond to operator input.
+4. **On first branch delta, exit the poll and act immediately** — review the diff, merge if clean, start the next cycle for the remaining workers. Don't wait out the full 5 min if you have a ready branch in hand.
 
 ## Reading worker reports from commits
 
