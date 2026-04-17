@@ -1,7 +1,11 @@
 {
-  "name": "octogent",
-  "version": "0.1.0",
-  "description": "Web-first command surface for running multiple coding agents in parallel",
+  "name": "octogent-evolved",
+  "version": "0.2.0",
+  "description": "Web-first command surface for running multiple coding agents in parallel. Fork of hesamsheikh/octogent with swarm orchestration and worktree workflow fixes.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/special-place-administrator/Octogent-Evolved.git"
+  },
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.0.0-rc.1",

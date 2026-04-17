@@ -16,7 +16,9 @@
 
 </div>
 
-# Octogent
+# Octogent-Evolved
+
+> **Fork of [hesamsheikh/octogent](https://github.com/hesamsheikh/octogent)** — original design, canvas UI, tentacle/worktree model, and channel-messaging primitive by **Hesam Sheikh**. This fork focuses on swarm-orchestration correctness and workflow robustness. See [`NOTICE.md`](./NOTICE.md) for full attribution and the list of changes.
 
 It's really not fun to have **ten Claude Code sessions open at once**, constantly switching between them and trying to remember what each one was supposed to do. *Things get blurry fast* when one agent is doing documentation, another is touching the database, another is changing the API, and another is somewhere in the frontend. **Octogent** tries to fix that by giving each job its own <u>scoped context, notes, and task list</u>, while also making it possible for Claude Code to **spawn other Claude Code agents**, assign them work, and communicate with them.
 
