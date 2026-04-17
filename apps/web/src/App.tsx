@@ -547,18 +547,27 @@ export const App = () => {
               onCanvasOpenTentacleIdsChange: setCanvasOpenTentacleIds,
               onCanvasTerminalsPanelWidthChange: setCanvasTerminalsPanelWidth,
               onCreateAgent: async (tentacleId, workspaceMode) => {
+                const mode = workspaceMode ?? "shared";
                 const response = await fetch("/api/terminals", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    workspaceMode: workspaceMode ?? "shared",
+                    workspaceMode: mode,
                     tentacleId,
+                    name: tentacleId,
+                    ...(mode === "worktree" ? { worktreeId: tentacleId } : {}),
                     agentProvider: "claude-code",
                     promptTemplate: "tentacle-worker",
                     promptVariables: { tentacleId },
                   }),
                 });
-                if (!response.ok) return undefined;
+                if (!response.ok) {
+                  const errorBody = await response.text().catch(() => response.statusText);
+                  console.error(
+                    `Failed to create agent for tentacle ${tentacleId}: ${response.status} ${errorBody}`,
+                  );
+                  return undefined;
+                }
                 const snapshot = (await response.json()) as { terminalId?: string };
                 await refreshColumns();
                 return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
