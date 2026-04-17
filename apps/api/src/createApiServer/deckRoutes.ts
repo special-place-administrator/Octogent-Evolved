@@ -25,7 +25,6 @@ import {
 } from "./routeHelpers";
 import { parseTerminalAgentProvider, parseTerminalWorkspaceMode } from "./terminalParsers";
 
-const shellSingleQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 const buildSingleTodoWorkerPrompt = async ({
   promptsDir,
@@ -562,42 +561,71 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
   const workerWorkspaceMode =
     body.workspaceMode === undefined ? "worktree" : workspaceModeResult.workspaceMode;
 
+  // Additive / idempotent: filter out todos already claimed by an active
+  // worker. A claim is just "there is a live terminal for this tentacle's
+  // swarm with a matching todoIndex in its terminalId" — tracked in the
+  // runtime registry, no markdown state. When a terminal exits or is
+  // removed, the claim auto-releases.
+  const existingTerminals = runtime.listTerminalSnapshots();
+  const claimedIndices = new Set<number>();
+  const workerIdPrefix = `${tentacleId}-swarm-`;
+  const parentSuffix = "-swarm-parent";
+  for (const terminal of existingTerminals) {
+    if (!terminal.terminalId.startsWith(workerIdPrefix)) continue;
+    if (terminal.terminalId.endsWith(parentSuffix)) continue; // parent isn't a worker
+    const suffix = terminal.terminalId.slice(workerIdPrefix.length);
+    const parsed = Number.parseInt(suffix, 10);
+    if (Number.isInteger(parsed)) {
+      claimedIndices.add(parsed);
+    }
+  }
+
+  let targetItems = incompleteItems.filter((item) => !claimedIndices.has(item.index));
+
   // Filter to specific item indices if requested.
-  let targetItems = incompleteItems;
   if (Array.isArray(body.todoItemIndices)) {
     const requestedIndices = new Set(
       (body.todoItemIndices as unknown[]).filter((v): v is number => typeof v === "number"),
     );
-    targetItems = incompleteItems.filter((item) => requestedIndices.has(item.index));
+    targetItems = targetItems.filter((item) => requestedIndices.has(item.index));
     if (targetItems.length === 0) {
       writeJson(
         response,
         400,
-        { error: "None of the requested todo item indices are incomplete." },
+        {
+          error:
+            "None of the requested todo item indices are free (either done, nonexistent, or already claimed by an active worker).",
+        },
         corsOrigin,
       );
       return true;
     }
   }
 
-  if (targetItems.length > MAX_CHILDREN_PER_PARENT) {
-    // Todo order is priority order, so overflow items are deferred automatically.
-    targetItems = targetItems.slice(0, MAX_CHILDREN_PER_PARENT);
-  }
-
-  // Check for existing swarm terminals to prevent duplicates.
-  const existingTerminals = runtime.listTerminalSnapshots();
-  const existingSwarmIds = existingTerminals
-    .filter((t) => t.terminalId.startsWith(`${tentacleId}-swarm-`))
-    .map((t) => t.terminalId);
-  if (existingSwarmIds.length > 0) {
+  if (targetItems.length === 0) {
     writeJson(
       response,
-      409,
-      { error: "A swarm is already active for this tentacle.", existingSwarmIds },
+      400,
+      {
+        error: "No free todo items available — all incomplete items are already claimed by active workers.",
+        claimedIndices: [...claimedIndices],
+      },
       corsOrigin,
     );
     return true;
+  }
+
+  // Worker count: bounded by min(body.maxWorkers, MAX_CHILDREN_PER_PARENT, targetItems.length).
+  // UI exposes maxWorkers as an explicit user control; MAX_CHILDREN_PER_PARENT
+  // is the runtime hard cap.
+  const rawMaxWorkers = typeof body.maxWorkers === "number" ? Math.floor(body.maxWorkers) : undefined;
+  const effectiveMax =
+    rawMaxWorkers !== undefined && rawMaxWorkers > 0
+      ? Math.min(rawMaxWorkers, MAX_CHILDREN_PER_PARENT)
+      : MAX_CHILDREN_PER_PARENT;
+  if (targetItems.length > effectiveMax) {
+    // Todo order is priority order, so overflow items are deferred.
+    targetItems = targetItems.slice(0, effectiveMax);
   }
 
   // Determine base ref: use tentacle's worktree branch if it exists, otherwise HEAD.
@@ -666,43 +694,61 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
   const buildCompletionStrategySection = (baseBranch: string): string =>
     workerWorkspaceMode === "worktree"
       ? [
-          `Only begin merging after ALL ${workers.length} workers have reported DONE.`,
+          `**Parameters for this swarm:**`,
+          "",
+          `- Base branch: \`${baseBranch}\``,
+          `- Integration branch: \`octogent_integration_${tentacleId}\``,
+          `- Worker branches:`,
+          ...workers.map(
+            (w) => `  - \`octogent/${w.terminalId}\` — item #${w.todoIndex}: ${w.todoText}`,
+          ),
           "",
           "### Step-by-step merge process",
           "",
-          `1. **Create an integration branch** from \`${baseBranch}\`. First check if a stale integration branch exists from a previous swarm attempt — if so, delete it before proceeding:`,
+          `1. **Create the integration branch** from \`${baseBranch}\`. Delete any stale one first:`,
           "   ```bash",
           `   git branch -D octogent_integration_${tentacleId} 2>/dev/null || true`,
           `   git checkout ${baseBranch}`,
           `   git checkout -b octogent_integration_${tentacleId}`,
           "   ```",
           "",
-          "2. **Merge each worker branch** into the integration branch one at a time. Start with the branch most likely to merge cleanly (fewest changes):",
+          "2. **Review each mergeable worker branch** before merging it:",
           "   ```bash",
-          "   git merge <worker-branch-name> --no-edit",
+          `   git log <worker-branch> --oneline`,
+          `   git show <worker-branch> --stat`,
+          `   git diff ${baseBranch}..<worker-branch>`,
           "   ```",
-          "   If there are conflicts, resolve them carefully. Read the conflicting files and understand both sides before choosing.",
+          `   A worker branch is "mergeable" when it is ahead of \`${baseBranch}\`, its worktree is clean, and its verification commands (per CONTEXT.md) pass. You do not need a DONE channel message — the commit IS the signal.`,
           "",
-          "3. **Run tests** on the integration branch after all merges. Do not skip this step.",
+          "3. **Merge each mergeable worker branch** into the integration branch. Start with the smallest diff:",
+          "   ```bash",
+          "   git merge --no-ff <worker-branch>",
+          "   ```",
+          "   Resolve conflicts carefully — read both sides before choosing.",
           "",
-          "4. **If tests pass**, merge the integration branch into the base branch:",
+          "4. **Run tests** on the integration branch after all merges. Do not skip this step.",
+          "",
+          `5. **If tests pass**, merge the integration branch into \`${baseBranch}\`:`,
           "   ```bash",
           `   git checkout ${baseBranch}`,
-          `   git merge octogent_integration_${tentacleId} --no-edit`,
+          `   git merge --no-ff octogent_integration_${tentacleId}`,
           "   ```",
           "",
-          "5. **If tests fail**, investigate and fix before merging. Do not merge broken code.",
+          "6. **If tests fail**, investigate and fix on the integration branch before merging into base. Do not merge broken code.",
           "",
-          `6. **Update tentacle state/docs** before finalizing. Mark completed items as done in \`.octogent/tentacles/${tentacleId}/todo.md\`, and update \`.octogent/tentacles/${tentacleId}/CONTEXT.md\` or other tentacle markdown files if the merged work changed the reality they describe.`,
+          `7. **Sync tentacle docs**: tick completed items \`[x]\` in \`.octogent/tentacles/${tentacleId}/todo.md\`. Update \`.octogent/tentacles/${tentacleId}/CONTEXT.md\` only if the merged work changed the reality it describes.`,
           "",
-          "7. **Clean up** the integration branch:",
+          "8. **Clean up:**",
           "   ```bash",
           `   git branch -d octogent_integration_${tentacleId}`,
           "   ```",
           "",
-          "### Merge failure recovery",
+          "### Handling stalled or blocked workers",
           "",
-          "If a worker's branch has conflicts that are too complex to resolve, send a message to that worker asking them to rebase their work. Merge the other workers' branches first.",
+          "- **No commits after ~15 minutes of activity**: likely stuck. Investigate; do not spawn a replacement worker.",
+          "- **Commit message contains `BLOCKED:`** (prefix or section): read the blocker body, resolve what you can (edit CONTEXT.md, unblock dependencies), or escalate to the operator.",
+          "- **Branch has commits but worktree is dirty**: worker is mid-step. Give it another poll cycle before merging.",
+          "- **Merge conflicts too complex to resolve**: merge the other workers' branches first; leave the conflicted one for the operator.",
         ].join("\n")
       : [
           `Only begin final verification after ALL ${workers.length} workers have reported DONE.`,
@@ -732,14 +778,54 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
           "If two workers collide in the same files, stop them from making broad new edits, inspect the current diff, and coordinate targeted follow-up changes instead of pretending there is a clean merge boundary.",
         ].join("\n");
 
+  const parentBaseBranch =
+    workerWorkspaceMode === "worktree" ? (baseRef === "HEAD" ? "main" : baseRef) : "main";
+
   try {
-    if (!needsParent) {
-      const [item] = targetItems;
-      const [worker] = workers;
-      if (!item || !worker) {
-        writeJson(response, 400, { error: "No incomplete todo items found." }, corsOrigin);
-        return true;
-      }
+    // Spawn every worker terminal directly from the API. The previous design
+    // delegated this to the parent coordinator agent (which was supposed to
+    // execute `octogent terminal create` commands via shell) — that was
+    // fragile: depended on agent compliance, agent timing, and shell-escaping
+    // correctness. Direct spawning is deterministic.
+    //
+    // Stagger subsequent worker spawns by SPAWN_STAGGER_MS so their Claude
+    // Code sessions don't all hit the initial-prompt-inject timer at the
+    // same system-load peak. Without this, concurrent bracketed-paste +
+    // Enter events interleave and Claude Code can fail to register the
+    // Enter as a submit, leaving the prompt staged but not sent.
+    const SPAWN_STAGGER_MS = 500;
+    let spawnIndex = 0;
+    for (const worker of workers) {
+      const item = targetItems.find((it) => it.index === worker.todoIndex);
+      if (!item) continue;
+
+      const parentSection = parentTerminalId
+        ? [
+            "## Communication",
+            "",
+            "Your coordinator reads your FINAL commit body (the `DONE:` / `BLOCKED:` marker) as the authoritative signal. That is the contract. Channels are optional courtesy, not required.",
+            "",
+            "Identity env vars set by the runtime (use these — do not hardcode IDs):",
+            "",
+            "- `$OCTOGENT_TERMINAL_ID` — your own terminal ID",
+            "- `$OCTOGENT_TENTACLE_ID` — the tentacle you belong to",
+            "- `$OCTOGENT_PARENT_TERMINAL_ID` — the coordinator's terminal ID",
+            "- `$OCTOGENT_ROLE` — `worker` for you",
+            "- `$OCTOGENT_API_BASE` — the live API origin (the CLI auto-picks this up)",
+            "",
+            "Optional channel-send (fire-and-forget; failure is harmless):",
+            "",
+            "```bash",
+            `octogent channel send "$OCTOGENT_PARENT_TERMINAL_ID" "DONE: ${item.text}" --from "$OCTOGENT_TERMINAL_ID" || true`,
+            "```",
+            "If blocked and you want to also ping the coordinator:",
+            "```bash",
+            `octogent channel send "$OCTOGENT_PARENT_TERMINAL_ID" "BLOCKED: <describe>" --from "$OCTOGENT_TERMINAL_ID" || true`,
+            "```",
+            "",
+            "Do not block on channel success. The commit body is the real report.",
+          ].join("\n")
+        : "";
 
       const workerPrompt = await resolvePrompt(promptsDir, "swarm-worker", {
         tentacleName,
@@ -753,14 +839,15 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
         commitGuidance: buildWorkerCommitGuidance(),
         definitionOfDoneCommitStep: buildWorkerDefinitionOfDoneCommitStep(),
         workspaceReminder: buildWorkerReminder(),
-        parentTerminalId: "",
-        parentSection: "",
+        parentTerminalId: parentTerminalId ?? "",
+        parentSection,
       });
 
       runtime.createTerminal({
         terminalId: worker.terminalId,
         tentacleId,
         ...(workerWorkspaceMode === "worktree" ? { worktreeId: worker.terminalId } : {}),
+        ...(parentTerminalId ? { parentTerminalId } : {}),
         tentacleName,
         nameOrigin: "generated",
         autoRenamePromptContext: item.text,
@@ -771,69 +858,20 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
         ...(workerPrompt ? { initialPrompt: workerPrompt } : {}),
         ...(workerWorkspaceMode === "worktree" ? { baseRef } : {}),
       });
+
+      spawnIndex++;
+      if (spawnIndex < workers.length) {
+        await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_STAGGER_MS));
+      }
     }
 
+    // Parent coordinator for multi-worker swarms. Role is monitor + merge
+    // only — it does NOT spawn workers. All workers listed in its prompt
+    // already exist at this point.
     if (needsParent && parentTerminalId) {
       const workerListing = workers
         .map((w) => `- \`${w.terminalId}\` — item #${w.todoIndex}: ${w.todoText}`)
         .join("\n");
-
-      const workerSpawnCommands = targetItems
-        .map((item) => {
-          const workerTerminalId = `${tentacleId}-swarm-${item.index}`;
-          const parentSection = [
-            "## Communication",
-            "",
-            `Your parent coordinator is at terminal \`${parentTerminalId}\`.`,
-            "When you complete your task, report back:",
-            "```bash",
-            `node bin/octogent channel send ${parentTerminalId} "DONE: ${item.text}" --from ${workerTerminalId}`,
-            "```",
-            "If you are blocked, ask for help:",
-            "```bash",
-            `node bin/octogent channel send ${parentTerminalId} "BLOCKED: <describe what you need>" --from ${workerTerminalId}`,
-            "```",
-          ].join("\n");
-
-          const promptVariables = JSON.stringify({
-            tentacleName,
-            tentacleId,
-            tentacleContextPath,
-            todoItemText: item.text,
-            terminalId: workerTerminalId,
-            apiPort,
-            workspaceContextIntro: buildWorkerContextIntro(),
-            workspaceGuidelines: buildWorkerGuidelines(workerTerminalId),
-            commitGuidance: buildWorkerCommitGuidance(),
-            definitionOfDoneCommitStep: buildWorkerDefinitionOfDoneCommitStep(),
-            workspaceReminder: buildWorkerReminder(),
-            parentTerminalId,
-            parentSection,
-          });
-
-          const commandParts = [
-            "node bin/octogent terminal create",
-            `--terminal-id ${shellSingleQuote(workerTerminalId)}`,
-            `--tentacle-id ${shellSingleQuote(tentacleId)}`,
-            `--parent-terminal-id ${shellSingleQuote(parentTerminalId)}`,
-            `--workspace-mode ${workerWorkspaceMode}`,
-            `--name ${shellSingleQuote(tentacleName)}`,
-            "--name-origin generated",
-            `--auto-rename-prompt-context ${shellSingleQuote(item.text)}`,
-            "--prompt-template swarm-worker",
-            `--prompt-variables ${shellSingleQuote(promptVariables)}`,
-          ];
-          if (workerWorkspaceMode === "worktree") {
-            commandParts.splice(3, 0, `--worktree-id ${shellSingleQuote(workerTerminalId)}`);
-          }
-          const command = commandParts.join(" ");
-
-          return `- \`${workerTerminalId}\`:\n  \`\`\`bash\n  ${command}\n  \`\`\``;
-        })
-        .join("\n");
-
-      const parentBaseBranch =
-        workerWorkspaceMode === "worktree" ? (baseRef === "HEAD" ? "main" : baseRef) : "main";
 
       const parentPrompt = await resolvePrompt(promptsDir, "swarm-parent", {
         tentacleName,
@@ -842,7 +880,6 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
         maxChildrenPerParent: String(MAX_CHILDREN_PER_PARENT),
         workerListing,
         workerWorkspaceSection: buildWorkerWorkspaceSection(),
-        workerSpawnCommands,
         completionStrategySection: buildCompletionStrategySection(parentBaseBranch),
         baseBranch: parentBaseBranch,
         terminalId: parentTerminalId,
@@ -868,6 +905,11 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
     throw error;
   }
 
-  writeJson(response, 201, { tentacleId, parentTerminalId, workers }, corsOrigin);
+  writeJson(
+    response,
+    201,
+    { tentacleId, parentTerminalId, workers, claimedIndicesBeforeSpawn: [...claimedIndices] },
+    corsOrigin,
+  );
   return true;
 };

@@ -546,8 +546,31 @@ export const App = () => {
               onCanvasOpenTerminalIdsChange: setCanvasOpenTerminalIds,
               onCanvasOpenTentacleIdsChange: setCanvasOpenTentacleIds,
               onCanvasTerminalsPanelWidthChange: setCanvasTerminalsPanelWidth,
-              onCreateAgent: async (tentacleId) => {
-                return await createTerminal("shared", undefined, tentacleId);
+              onCreateAgent: async (tentacleId, workspaceMode) => {
+                const mode = workspaceMode ?? "shared";
+                const response = await fetch("/api/terminals", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    workspaceMode: mode,
+                    tentacleId,
+                    name: tentacleId,
+                    ...(mode === "worktree" ? { worktreeId: tentacleId } : {}),
+                    agentProvider: "claude-code",
+                    promptTemplate: "tentacle-worker",
+                    promptVariables: { tentacleId },
+                  }),
+                });
+                if (!response.ok) {
+                  const errorBody = await response.text().catch(() => response.statusText);
+                  console.error(
+                    `Failed to create agent for tentacle ${tentacleId}: ${response.status} ${errorBody}`,
+                  );
+                  return undefined;
+                }
+                const snapshot = (await response.json()) as { terminalId?: string };
+                await refreshColumns();
+                return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
               },
               onCreateTerminal: async () => {
                 return await createTerminal("shared", undefined, OCTOBOSS_ID);
@@ -564,16 +587,27 @@ export const App = () => {
                 if (!response.ok) return;
                 await refreshColumns();
               },
-              onSpawnSwarm: async (tentacleId, workspaceMode) => {
+              onSpawnSwarm: async (tentacleId, workspaceMode, maxWorkers) => {
+                const body: Record<string, unknown> = { workspaceMode };
+                if (typeof maxWorkers === "number" && maxWorkers > 0) {
+                  body.maxWorkers = Math.floor(maxWorkers);
+                }
                 const response = await fetch(
                   `/api/deck/tentacles/${encodeURIComponent(tentacleId)}/swarm`,
                   {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ workspaceMode }),
+                    body: JSON.stringify(body),
                   },
                 );
-                if (!response.ok) return;
+                if (!response.ok) {
+                  const errorBody = await response.text().catch(() => response.statusText);
+                  console.error(
+                    `Failed to spawn swarm for tentacle ${tentacleId}: ${response.status} ${errorBody}`,
+                  );
+                  return;
+                }
+                await refreshColumns();
               },
               onOctobossAction: async (action) => {
                 const response = await fetch("/api/terminals", {

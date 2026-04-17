@@ -6,6 +6,7 @@ import { basename, join, resolve } from "node:path";
 import {
   ensureOctogentGitignoreEntry,
   ensureProjectScaffold,
+  findProjectWorkspaceRoot,
   loadProjectConfig,
   loadProjectsRegistry,
   migrateStateToGlobal,
@@ -156,9 +157,13 @@ const resolveRuntimeApiBase = () => {
     return explicitBase;
   }
 
-  const projectConfig = loadProjectConfig(process.cwd());
+  // Walk up from cwd to find the owning project. This matters when the CLI
+  // is invoked from inside a git worktree (e.g. .octogent/worktrees/<id>/)
+  // — loadProjectConfig alone would miss the config living one level up.
+  const workspaceRoot = findProjectWorkspaceRoot(process.cwd()) ?? process.cwd();
+  const projectConfig = loadProjectConfig(workspaceRoot);
   if (projectConfig) {
-    const projectStateDir = resolveProjectStateDir(process.cwd(), projectConfig.displayName);
+    const projectStateDir = resolveProjectStateDir(workspaceRoot, projectConfig.displayName);
     const runtimeMetadata = readRuntimeMetadata(projectStateDir);
     if (runtimeMetadata) {
       return runtimeMetadata.apiBaseUrl;

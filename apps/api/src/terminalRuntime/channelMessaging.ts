@@ -10,6 +10,14 @@ export const createChannelMessaging = (deps: {
   const channelQueues = new Map<string, ChannelMessage[]>();
   let channelMessageCounter = 0;
 
+  const BRACKETED_PASTE_START = "\x1b[200~";
+  const BRACKETED_PASTE_END = "\x1b[201~";
+  // Matches sessionRuntime.ts INITIAL_PROMPT_SUBMIT_DELAY_MS. Claude Code's
+  // multi-line paste UI stages the buffer and needs a deliberate Enter a
+  // moment later to register as submit; a trailing `\r` in the same write
+  // is eaten as a newline inside the paste.
+  const CHANNEL_SUBMIT_DELAY_MS = 2_000;
+
   const deliverChannelMessages = (terminalId: string): void => {
     const queue = channelQueues.get(terminalId);
     if (!queue || queue.length === 0) {
@@ -30,7 +38,7 @@ export const createChannelMessaging = (deps: {
     const lines = undelivered.map(
       (m) => `[Channel message from ${m.fromTerminalId}]: ${m.content}`,
     );
-    const prompt = `${lines.join("\n")}\r`;
+    const text = lines.join("\n");
 
     logVerbose(`[Channel] Delivering ${undelivered.length} message(s) to ${terminalId}`);
 
@@ -38,7 +46,17 @@ export const createChannelMessaging = (deps: {
       m.delivered = true;
     }
 
-    writeInput(terminalId, prompt);
+    const terminal = terminals.get(terminalId);
+    const useBracketedPaste = (terminal?.agentProvider ?? "claude-code") === "claude-code";
+
+    if (useBracketedPaste) {
+      writeInput(terminalId, `${BRACKETED_PASTE_START}${text}${BRACKETED_PASTE_END}`);
+      setTimeout(() => {
+        writeInput(terminalId, "\r");
+      }, CHANNEL_SUBMIT_DELAY_MS);
+    } else {
+      writeInput(terminalId, `${text}\r`);
+    }
   };
 
   return {

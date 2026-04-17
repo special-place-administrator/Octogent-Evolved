@@ -33,6 +33,7 @@ type CreateSessionRuntimeOptions = {
     tentacleId: string;
   } | null;
   getTentacleWorkspaceCwd: (tentacleId: string) => string;
+  getApiBaseUrl?: () => string;
   isDebugPtyLogsEnabled: boolean;
   ptyLogDir: string;
   transcriptDirectoryPath: string;
@@ -53,6 +54,7 @@ export const createSessionRuntime = ({
   sessions,
   resolveTerminalSession,
   getTentacleWorkspaceCwd,
+  getApiBaseUrl,
   isDebugPtyLogsEnabled,
   ptyLogDir,
   transcriptDirectoryPath,
@@ -291,7 +293,15 @@ export const createSessionRuntime = ({
   };
 
   const INITIAL_PROMPT_DELAY_MS = 4_000;
-  const INITIAL_PROMPT_SUBMIT_DELAY_MS = 150;
+  // Claude Code's multi-line bracketed-paste handler shows
+  // '[Pasted text #1 +N lines]' and waits on Enter to submit. 150ms
+  // wasn't enough for the paste buffer to finalize before our Enter
+  // arrived, so the Enter got consumed as part of paste-processing,
+  // not as a submit — leaving the prompt staged but not sent. 2000ms
+  // gives Claude Code time to finalize and register our Enter as a
+  // real submit, even under concurrent-spawn load.
+  const INITIAL_PROMPT_SUBMIT_DELAY_MS = 2_000;
+  const CLAUDE_SLASH_COMMAND_DELAY_MS = 600;
   const BRACKETED_PASTE_START = "\x1b[200~";
   const BRACKETED_PASTE_END = "\x1b[201~";
 
@@ -329,6 +339,26 @@ export const createSessionRuntime = ({
     appendDebugLog(session, `bootstrap session=${sessionId} command=${bootstrapCommand}`);
     session.pty.write(`${bootstrapCommand}\r`);
 
+    // For claude-code terminals, enable automatic model selection (/effort auto)
+    // once the agent has booted. Runs before any initial prompt injection so the
+    // effort setting is in place before the real first message arrives.
+    if (provider === "claude-code") {
+      setTimeout(() => {
+        if (sessions.get(sessionId) !== session) {
+          return;
+        }
+        appendDebugLog(session, `effort-auto session=${sessionId}`);
+        session.pty.write("/effort auto\r");
+      }, INITIAL_PROMPT_DELAY_MS);
+    }
+
+    // Delay the initial prompt injection for claude-code so /effort auto has
+    // time to process before the bracketed paste arrives.
+    const promptInjectionDelayMs =
+      provider === "claude-code"
+        ? INITIAL_PROMPT_DELAY_MS + CLAUDE_SLASH_COMMAND_DELAY_MS
+        : INITIAL_PROMPT_DELAY_MS;
+
     // Schedule initial prompt injection after Claude Code has had time to boot.
     if (session.initialPrompt && !session.isInitialPromptSent) {
       setTimeout(() => {
@@ -346,7 +376,7 @@ export const createSessionRuntime = ({
           appendDebugLog(session, `initial-prompt-submit session=${sessionId}`);
           session.pty.write("\r");
         }, INITIAL_PROMPT_SUBMIT_DELAY_MS);
-      }, INITIAL_PROMPT_DELAY_MS);
+      }, promptInjectionDelayMs);
     }
 
     if (session.initialInputDraft && !session.isInitialInputDraftSent && !session.initialPrompt) {
@@ -358,7 +388,7 @@ export const createSessionRuntime = ({
         appendDebugLog(session, `initial-input-draft session=${sessionId}`);
         const draft = session.initialInputDraft ?? "";
         session.pty.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
-      }, INITIAL_PROMPT_DELAY_MS);
+      }, promptInjectionDelayMs);
     }
   };
 
@@ -378,13 +408,26 @@ export const createSessionRuntime = ({
     ensureNodePtySpawnHelperExecutable();
     const shellLaunch = getShellLaunch();
 
+    const resolvedRole: "coordinator" | "worker" | "standalone" = terminalRecord?.parentTerminalId
+      ? "worker"
+      : terminalRecord?.workspaceMode === "shared"
+        ? "coordinator"
+        : "standalone";
+
     let pty: IPty;
     try {
       pty = spawn(shellLaunch.command, shellLaunch.args, {
         cols: DEFAULT_PTY_COLS,
         rows: DEFAULT_PTY_ROWS,
         cwd: tentacleCwd,
-        env: createShellEnvironment({ octogentSessionId: sessionId }),
+        env: createShellEnvironment({
+          octogentSessionId: sessionId,
+          terminalId: sessionId,
+          tentacleId: terminalRecord?.tentacleId ?? tentacleId,
+          parentTerminalId: terminalRecord?.parentTerminalId,
+          role: resolvedRole,
+          apiBaseUrl: getApiBaseUrl?.(),
+        }),
         name: "xterm-256color",
       });
     } catch (error) {

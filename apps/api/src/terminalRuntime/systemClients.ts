@@ -207,10 +207,33 @@ export const createDefaultGitClient = (): GitClient => ({
 
   addWorktree({ cwd, path, branchName, baseRef }) {
     mkdirSync(dirname(path), { recursive: true });
-    execFileSync("git", ["worktree", "add", "-b", branchName, path, baseRef], {
-      cwd,
-      stdio: "pipe",
-    });
+
+    // Check whether the branch already exists. If it does, attach the new
+    // worktree to that branch instead of creating a new one — this lets
+    // sequential workers on the same tentacle resume on the previous
+    // worker's branch after a merge + terminal cleanup cycle.
+    let branchExists = false;
+    try {
+      execFileSync("git", ["rev-parse", "--verify", `refs/heads/${branchName}`], {
+        cwd,
+        stdio: "pipe",
+      });
+      branchExists = true;
+    } catch {
+      branchExists = false;
+    }
+
+    if (branchExists) {
+      execFileSync("git", ["worktree", "add", path, branchName], {
+        cwd,
+        stdio: "pipe",
+      });
+    } else {
+      execFileSync("git", ["worktree", "add", "-b", branchName, path, baseRef], {
+        cwd,
+        stdio: "pipe",
+      });
+    }
   },
 
   removeWorktree({ cwd, path }) {

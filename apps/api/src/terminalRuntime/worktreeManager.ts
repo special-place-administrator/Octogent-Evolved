@@ -68,8 +68,13 @@ export const createWorktreeManager = ({
   const createTentacleWorktree = (tentacleId: string, baseRef = "HEAD") => {
     assertWorktreeCreationSupported();
     const worktreePath = getTentacleWorktreePath(tentacleId);
+
+    // Idempotent: if the worktree path already exists, assume it belongs
+    // to this tentacle and reuse it. A new terminal can then attach to a
+    // previous worker's worktree (sequential work on the same tentacle)
+    // without tearing down the previous worker's branch state.
     if (existsSync(worktreePath)) {
-      throw new RuntimeInputError(`Worktree path already exists: ${worktreePath}`);
+      return;
     }
 
     try {
