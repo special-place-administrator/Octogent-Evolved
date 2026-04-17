@@ -769,6 +769,14 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
     // execute `octogent terminal create` commands via shell) — that was
     // fragile: depended on agent compliance, agent timing, and shell-escaping
     // correctness. Direct spawning is deterministic.
+    //
+    // Stagger subsequent worker spawns by SPAWN_STAGGER_MS so their Claude
+    // Code sessions don't all hit the initial-prompt-inject timer at the
+    // same system-load peak. Without this, concurrent bracketed-paste +
+    // Enter events interleave and Claude Code can fail to register the
+    // Enter as a submit, leaving the prompt staged but not sent.
+    const SPAWN_STAGGER_MS = 500;
+    let spawnIndex = 0;
     for (const worker of workers) {
       const item = targetItems.find((it) => it.index === worker.todoIndex);
       if (!item) continue;
@@ -820,6 +828,11 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
         ...(workerPrompt ? { initialPrompt: workerPrompt } : {}),
         ...(workerWorkspaceMode === "worktree" ? { baseRef } : {}),
       });
+
+      spawnIndex++;
+      if (spawnIndex < workers.length) {
+        await new Promise<void>((resolve) => setTimeout(resolve, SPAWN_STAGGER_MS));
+      }
     }
 
     // Parent coordinator for multi-worker swarms. Role is monitor + merge

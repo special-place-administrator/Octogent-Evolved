@@ -291,7 +291,14 @@ export const createSessionRuntime = ({
   };
 
   const INITIAL_PROMPT_DELAY_MS = 4_000;
-  const INITIAL_PROMPT_SUBMIT_DELAY_MS = 150;
+  // Claude Code's multi-line bracketed-paste handler shows
+  // '[Pasted text #1 +N lines]' and waits on Enter to submit. 150ms
+  // wasn't enough for the paste buffer to finalize before our Enter
+  // arrived, so the Enter got consumed as part of paste-processing,
+  // not as a submit — leaving the prompt staged but not sent. 2000ms
+  // gives Claude Code time to finalize and register our Enter as a
+  // real submit, even under concurrent-spawn load.
+  const INITIAL_PROMPT_SUBMIT_DELAY_MS = 2_000;
   const CLAUDE_SLASH_COMMAND_DELAY_MS = 600;
   const BRACKETED_PASTE_START = "\x1b[200~";
   const BRACKETED_PASTE_END = "\x1b[201~";
