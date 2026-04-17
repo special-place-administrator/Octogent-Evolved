@@ -499,9 +499,19 @@ export const createTerminalRuntime = ({
 
         sessionRuntime.closeSession(cascadeTerminalId);
         if (cascadeTerminal.workspaceMode === "worktree") {
-          worktreeManager.removeTentacleWorktree(
-            cascadeTerminal.worktreeId ?? cascadeTerminal.tentacleId,
-          );
+          const effectiveWorktreeId =
+            cascadeTerminal.worktreeId ?? cascadeTerminal.tentacleId;
+          // Tentacle-scoped worktrees (worktreeId === tentacleId) belong to
+          // the tentacle, not the terminal. Preserve them across terminal
+          // lifecycles so sequential workers on the same tentacle can resume
+          // on the previous worker's branch. Free-standing worktrees
+          // (worktreeId !== tentacleId, e.g. octoboss ad-hoc terminals) are
+          // one-per-terminal and remain auto-cleaned.
+          const isTentacleScopedWorktree =
+            effectiveWorktreeId === cascadeTerminal.tentacleId;
+          if (!isTentacleScopedWorktree) {
+            worktreeManager.removeTentacleWorktree(effectiveWorktreeId);
+          }
         }
         terminals.delete(cascadeTerminalId);
       }
