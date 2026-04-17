@@ -26,6 +26,34 @@ Before writing any code, read `CONTEXT.md` and any other `.md` files in that fol
 {{commitGuidance}}
 {{parentSection}}
 
+## Commit-message contract (the signal your coordinator reads)
+
+The coordinator gates merge decisions on the body of your **FINAL** commit, not on channel messages (those are advisory and can fail silently). Your final commit MUST carry a structured `DONE:` or `BLOCKED:` marker. Use this exact shape:
+
+```
+<conventional-commits subject>   # e.g. feat({{tentacleId}}#<todo-number>): <short summary>
+
+DONE: <one-line summary of what landed>
+
+Verification: <what you ran, what passed>
+Files touched: <file-by-file summary>
+Caveats: <follow-ups or gotchas for the operator — write "none" if none>
+```
+
+Or, if the work is blocked:
+
+```
+<conventional-commits subject — use `chore` type since no code changed>
+
+BLOCKED: <one-line blocker description>
+
+Tried: <what you attempted>
+Failed: <the exact error / output / reason>
+Needs: <the concrete decision or information you need>
+```
+
+If you produce multiple commits on your branch, only the FINAL commit needs the marker. The coordinator reads `git log -1 --format=%B` on your branch to gate the merge.
+
 ## Definition of Done
 
 You are done when ALL of these are true:
@@ -33,9 +61,11 @@ You are done when ALL of these are true:
 1. The todo item is implemented.
 2. Tests pass (run them — don't assume).
 3. {{definitionOfDoneCommitStep}}
-4. You have reported DONE to your parent coordinator (if you have one).
+4. Your final commit body carries a `DONE:` marker in the shape above.
 
-If you cannot complete the item, report BLOCKED to your parent with a specific description of what's stopping you. "I'm stuck" is not useful — say what you tried and what failed.
+Do not send a channel message as your "report" — the commit body IS the report. If you want to also send a channel message as a live status update for the operator, it's fine (the `{{parentSection}}` block above shows how), but treat it as fire-and-forget. Failure is harmless.
+
+If you cannot complete the item, your final commit body carries `BLOCKED:` in the shape above instead. "I'm stuck" is not useful — state the specific decision or information you need.
 
 ## Common Failure Modes
 
