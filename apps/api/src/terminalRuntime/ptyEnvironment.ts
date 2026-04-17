@@ -4,7 +4,16 @@ import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
 
-export const createShellEnvironment = (options?: { octogentSessionId?: string }) => {
+export type ShellEnvironmentOptions = {
+  octogentSessionId?: string;
+  terminalId?: string;
+  tentacleId?: string;
+  parentTerminalId?: string;
+  role?: "coordinator" | "worker" | "standalone";
+  apiBaseUrl?: string;
+};
+
+export const createShellEnvironment = (options?: ShellEnvironmentOptions) => {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") {
@@ -15,6 +24,22 @@ export const createShellEnvironment = (options?: { octogentSessionId?: string })
   env.COLORTERM = "truecolor";
   if (options?.octogentSessionId) {
     env.OCTOGENT_SESSION_ID = options.octogentSessionId;
+  }
+  if (options?.terminalId) {
+    env.OCTOGENT_TERMINAL_ID = options.terminalId;
+  }
+  if (options?.tentacleId) {
+    env.OCTOGENT_TENTACLE_ID = options.tentacleId;
+  }
+  if (options?.parentTerminalId) {
+    env.OCTOGENT_PARENT_TERMINAL_ID = options.parentTerminalId;
+  }
+  if (options?.role) {
+    env.OCTOGENT_ROLE = options.role;
+  }
+  if (options?.apiBaseUrl) {
+    env.OCTOGENT_API_BASE = options.apiBaseUrl;
+    env.OCTOGENT_API_ORIGIN = options.apiBaseUrl;
   }
   return env;
 };

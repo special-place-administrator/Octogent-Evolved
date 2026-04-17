@@ -33,6 +33,7 @@ type CreateSessionRuntimeOptions = {
     tentacleId: string;
   } | null;
   getTentacleWorkspaceCwd: (tentacleId: string) => string;
+  getApiBaseUrl?: () => string;
   isDebugPtyLogsEnabled: boolean;
   ptyLogDir: string;
   transcriptDirectoryPath: string;
@@ -53,6 +54,7 @@ export const createSessionRuntime = ({
   sessions,
   resolveTerminalSession,
   getTentacleWorkspaceCwd,
+  getApiBaseUrl,
   isDebugPtyLogsEnabled,
   ptyLogDir,
   transcriptDirectoryPath,
@@ -406,13 +408,26 @@ export const createSessionRuntime = ({
     ensureNodePtySpawnHelperExecutable();
     const shellLaunch = getShellLaunch();
 
+    const resolvedRole: "coordinator" | "worker" | "standalone" = terminalRecord?.parentTerminalId
+      ? "worker"
+      : terminalRecord?.workspaceMode === "shared"
+        ? "coordinator"
+        : "standalone";
+
     let pty: IPty;
     try {
       pty = spawn(shellLaunch.command, shellLaunch.args, {
         cols: DEFAULT_PTY_COLS,
         rows: DEFAULT_PTY_ROWS,
         cwd: tentacleCwd,
-        env: createShellEnvironment({ octogentSessionId: sessionId }),
+        env: createShellEnvironment({
+          octogentSessionId: sessionId,
+          terminalId: sessionId,
+          tentacleId: terminalRecord?.tentacleId ?? tentacleId,
+          parentTerminalId: terminalRecord?.parentTerminalId,
+          role: resolvedRole,
+          apiBaseUrl: getApiBaseUrl?.(),
+        }),
         name: "xterm-256color",
       });
     } catch (error) {
