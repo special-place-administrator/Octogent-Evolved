@@ -125,6 +125,7 @@ preferences, git workflow, commit discipline, parallelism limits. Cite
 section headings from the global rules file.>
 
 - <rule> — source: `~/.claude/CLAUDE.md §<section>`
+- **SymForge edit tools are DISABLED inside worktrees.** You are running in a git worktree (`.octogent/worktrees/<id>/`). SymForge's edit tools (`edit_within_symbol`, `replace_symbol_body`, `batch_edit`, `insert_symbol`, `batch_insert`, `batch_rename`, `delete_symbol`) resolve paths against the *indexed root* (main repo), not your worktree cwd — so any edit would silently write to the main repo and block the orchestrator's merge. Use the built-in `Edit` / `Write` tools with absolute paths inside your worktree. SymForge **read** tools (`get_symbol`, `search_symbols`, `get_file_context`, etc.) are fine — source content matches at typical branch points. — source: `[[SymForge Worktree Awareness]]` (Obsidian wiki); observed incident: GW2 Build Optimizer 2026-04-16.
 
 ## Verification
 <Exact commands that must pass before declaring a todo item done. Pull
@@ -155,7 +156,7 @@ Run from the project root:
     octogent terminal create \
       --tentacle-id <id> \
       --workspace-mode worktree \
-      --initial-prompt "Read your CONTEXT.md and todo.md. Pick the highest-priority incomplete todo item. Complete it end-to-end: implement, run verification, commit. Report DONE and exit."
+      --initial-prompt "Read your CONTEXT.md and todo.md in full. You are in a git worktree — do NOT use SymForge edit tools (edit_within_symbol / replace_symbol_body / batch_edit / insert_symbol / batch_insert / batch_rename / delete_symbol); they write to the indexed main repo, not your worktree. Use built-in Edit/Write. SymForge reads are fine. Pick the highest-priority incomplete todo item. Complete it end-to-end: implement, run verification, commit. Report DONE and exit."
 
 ## When to run
 <Trigger model. Examples: "on-demand", "pre-deploy", "post-deploy",
@@ -196,7 +197,7 @@ On **Y / Y M / Y all**: for each agent, run:
 octogent terminal create \
   --tentacle-id <tentacle-id> \
   --workspace-mode worktree \
-  --initial-prompt "Read .octogent/tentacles/<id>/CONTEXT.md and todo.md. Pick the highest-priority incomplete todo item you can complete without overlap with other active agents. Implement it, run verification commands, commit. Report DONE and exit."
+  --initial-prompt "Read .octogent/tentacles/<id>/CONTEXT.md and todo.md in full. You are in a git worktree — do NOT use SymForge edit tools (edit_within_symbol / replace_symbol_body / batch_edit / insert_symbol / batch_insert / batch_rename / delete_symbol); they write to the indexed main repo, not your worktree. Use built-in Edit/Write. SymForge reads are fine. Pick the highest-priority incomplete todo item you can complete without overlap with other active agents. Implement it, run verification commands, commit. Report DONE and exit."
 ```
 
 Run these sequentially from inside this planner terminal — each CLI call should complete before the next starts. Report each terminal ID as it's created.
