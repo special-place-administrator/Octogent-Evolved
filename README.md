@@ -8,46 +8,25 @@
 <br />
 <br />
 
-![Last Update](https://img.shields.io/github/last-commit/hesamsheikh/octogent?label=Last%20Update&style=flat-square)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-22+-5FA04E?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Follow on X](https://img.shields.io/badge/Follow%20on-X-000000?style=flat-square&logo=x)](https://x.com/Hesamation)
-[![Discord](https://img.shields.io/badge/Discord-Open%20Source%20AI%20Builders-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/vtJykN3t)
+[![Fork of](https://img.shields.io/badge/fork%20of-hesamsheikh%2Foctogent-0A84FF?style=flat-square&logo=github)](https://github.com/hesamsheikh/octogent)
 
 </div>
 
 # Octogent-Evolved
 
-> **Fork of [hesamsheikh/octogent](https://github.com/hesamsheikh/octogent)** — original design, canvas UI, tentacle/worktree model, and channel-messaging primitive by **Hesam Sheikh**. This fork focuses on swarm-orchestration correctness and workflow robustness. See [`NOTICE.md`](./NOTICE.md) for full attribution and the list of changes.
+> **Fork of [hesamsheikh/octogent](https://github.com/hesamsheikh/octogent)** by **Hesam Sheikh** — original design, canvas UI, tentacle/worktree model, and channel-messaging primitive. This fork hardens the swarm-orchestration flow for real multi-worker workloads. See [`NOTICE.md`](./NOTICE.md) for attribution in full.
 
-It's really not fun to have **ten Claude Code sessions open at once**, constantly switching between them and trying to remember what each one was supposed to do. *Things get blurry fast* when one agent is doing documentation, another is touching the database, another is changing the API, and another is somewhere in the frontend. **Octogent** tries to fix that by giving each job its own <u>scoped context, notes, and task list</u>, while also making it possible for Claude Code to **spawn other Claude Code agents**, assign them work, and communicate with them.
+It's really not fun to have **ten Claude Code sessions open at once**, constantly switching between them and trying to remember what each one was supposed to do. *Things get blurry fast* when one agent is doing documentation, another is touching the database, another is changing the API, and another is somewhere in the frontend. **Octogent** gives each job its own <u>scoped context, notes, and task list</u>, while also making it possible for Claude Code to **spawn other Claude Code agents**, assign them work, and communicate with them.
 
 ## The Vision
 
-This repo is a personal exploration of what an AI coding environment might look like when terminal coding agents are treated as parts of a bigger orchestration layer, not the final interface by themselves. The point is not to hide **Claude Code** behind abstractions. The point is to make *multi-agent work less chaotic for the developer* on a real codebase.
-
-## Screenshots
-
-<div align="center">
-<table>
-<tr>
-<td><img src="./static/images/preview_1.jpg" alt="Screenshot 1" width="100%"/></td>
-<td><img src="./static/images/preview_2.jpg" alt="Screenshot 2" width="100%"/></td>
-</tr>
-<tr>
-<td><img src="./static/images/preview_3.jpg" alt="Screenshot 3" width="100%"/></td>
-<td><img src="./static/images/preview_4.jpg" alt="Screenshot 4" width="100%"/></td>
-</tr>
-<tr>
-<td><img src="./static/images/preview_5.jpg" alt="Screenshot 5" width="100%"/></td>
-<td><img src="./static/images/preview_6.jpg" alt="Screenshot 6" width="100%"/></td>
-</tr>
-</table>
-</div>
+Treat terminal coding agents as parts of a bigger orchestration layer — not the final interface by themselves. The point is not to hide **Claude Code** behind abstractions; the point is to make *multi-agent work less chaotic for the developer* on a real codebase.
 
 ## What Octogent Does for You
 
-- **Creates tentacles as context layers** so agents can work with scoped markdown files instead of broad, messy chat context
+- **Creates tentacles as context layers** so agents work with scoped markdown files instead of broad, messy chat context
 - **Uses `todo.md` as an execution surface** so tasks stay visible, trackable, and ready for delegation
 - **Runs multiple Claude Code terminals** so one developer can coordinate several coding sessions at once
 - **Spawns child agents from todo items** so parallel work has a concrete source of truth
@@ -55,123 +34,138 @@ This repo is a personal exploration of what an AI coding environment might look 
 - **Keeps agent-facing context in files** so the system is more durable than a single prompt thread
 - **Provides a local API and UI** for terminal lifecycle, persistence, websocket transport, and orchestration
 
-A **tentacle** is a folder under `.octogent/tentacles/<tentacle-id>/` that holds agent-readable markdown such as `CONTEXT.md`, `todo.md`, and any extra notes needed for that slice of the codebase.
+A **tentacle** is a folder under `.octogent/tentacles/<tentacle-id>/` that holds agent-readable markdown such as `CONTEXT.md`, `todo.md`, and any extra notes needed for that slice of the codebase. The octopus metaphor is literal: *one octopus, many tentacles, different work happening at the same time*.
 
-The octopus metaphor is literal: *one octopus, many tentacles, different work happening at the same time*.
+---
 
-## Tentacles
+## Divergence from upstream
 
-A **tentacle** is a scoped job container. It gives one slice of work its own files, notes, and `todo.md` so the agent is not forced to reconstruct the entire codebase context from chat history.
+This fork began on `fix/swarm-orchestration` with the goal of making the swarm flow actually work end-to-end for multi-worker tentacles under real load. Upstream's swarm path had silent failure modes at several layers. The merged commits below, listed in merge order, address each one.
 
-What it does:
+### Swarm correctness
 
-- keeps context local to one area such as documentation, database work, API changes, or frontend work
-- gives agents durable files they can read and update
-- provides a natural source for delegation through todo items
+| Commit | Area | Summary |
+|---|---|---|
+| `77f902d` | CLI path | Parent-coordinator prompts no longer run `node bin/octogent`; they use the PATH-resolved `octogent` command. Fixes silent worker-spawn failures from any cwd that isn't the octogent package directory. |
+| `b2b1818` | UI | "Create Agent" now exposes a workspace-mode picker. Context-menu entry correctly scopes worktree terminals to the clicked tentacle (was hardcoded to the root). |
+| `e391734` | Planner prompt | `prompts/tentacle-planner.md` rewritten as a 5-phase low-interaction orchestrator with at most two user checkpoints (layout approval + auto-spawn confirmation). Mandates `- [ ]` checkbox format for `todo.md` so `parseTodoProgress` doesn't 400. |
+| `e8c9a0f` | Bootstrap | Claude-code terminals now receive `/effort auto` as part of their boot sequence. |
+| `6d119f6` | Planner prompt | Adds the "SymForge edit tools are read-only inside a worktree" guardrail so workers don't silently write into the main index. |
+| `31b5afe` | UI | "Create Agent" auto-injects the `tentacle-worker` prompt template with proper identity substitution. |
+| `fd66f50` | Worker flow | Six-fix polish batch for GUI-native orchestration (template variable threading, context-menu scoping, misc). |
+| `2cbf7de` | Runtime | Tentacle-scoped worktrees now persist across terminal cascade cleanup. Free-standing worker worktrees still auto-clean. |
+| `f2a8392` | Swarm spawn | API spawns all workers directly instead of asking the parent to shell-exec them. Adds claim-based idempotent spawn and a worker-count picker (1–9) in the panel. |
+| `2c322d6` | PTY | Fixes the "[Pasted text #1 +N lines]" staging race where multiple concurrent spawns left prompts unsubmitted. `INITIAL_PROMPT_SUBMIT_DELAY_MS` bumped to 2000 ms + 500 ms stagger between worker spawns. |
 
-For the full model, see [Tentacles](docs/concepts/tentacles.md) and [Working With Todos](docs/guides/working-with-todos.md).
+### Swarm contract rewrite
 
-## Context, Notes, and Task Lists
+| Commit | Area | Summary |
+|---|---|---|
+| `d7df799` | Coordinator prompt | New "commits are the signal" contract. Coordinator no longer waits for `DONE` channel messages; it gates merge decisions on the branch state and the final commit body. Channels become advisory. |
+| `fbe3076` | Coordinator prompt | Dynamic poll cap. Coordinator picks **2 / 5 / 10 minutes** before the first poll based on estimated task size (with rules for re-picking between cycles). Supersedes the earlier hardcoded 5-min cap (`aea0339`). |
+| `61655ef` | Worker & coordinator prompts | Two tightenings: (a) `ahead=0` is explicitly called out as "not yet started / in progress" so the coordinator never misreads a fresh worker branch as already-merged; (b) worker's FINAL commit body MUST carry a structured `DONE:` or `BLOCKED:` marker in a fixed shape (summary / verification / files / caveats, or tried / failed / needs). |
+| `977e786` | Swarm-worker prompt | `prompts/swarm-worker.md` (the template used by multi-worker swarms, distinct from `tentacle-worker.md`) also mandates the `DONE:` / `BLOCKED:` marker. Previously only the solo-worker template carried it. |
 
-In Octogent, a tentacle is not only a task bucket. It is also where the job keeps its local context. That can include notes about one part of the codebase, implementation details, handoff files, and a `todo.md` that tracks what still needs to happen. A Claude Code agent can read and update those files as the work moves forward.
+### Identity & portability
 
-That means you can:
+| Commit | Area | Summary |
+|---|---|---|
+| `a8cc2cd` | Runtime | Every spawned PTY now inherits identity env vars: `OCTOGENT_TERMINAL_ID`, `OCTOGENT_TENTACLE_ID`, `OCTOGENT_PARENT_TERMINAL_ID`, `OCTOGENT_ROLE`, `OCTOGENT_API_BASE`. Prompts and user commands never hardcode IDs. |
+| `ee3de78` | CLI | `resolveRuntimeApiBase` walks **up** from `cwd` looking for the owning project's config. Fixes `octogent` commands (including `channel send`) from inside a git worktree — previously fell back to the default port and hit either nothing or a stale server. |
+| `82d92be` | Channel delivery | Channel messages sent to claude-code terminals now use bracketed-paste + a deliberate `\r` 2 seconds later (same idiom as initial-prompt injection). Stops messages from staging unsubmitted in the input buffer. |
 
-- keep documentation, database, API, or frontend work separated into different job contexts
-- store the notes that help an agent understand that part of the codebase
-- spawn one agent for one specific item
-- break a larger job into multiple items
-- launch a swarm so several agents work through the list in parallel
-- use the files inside the tentacle as the shared source of truth for what is done and what is left
+### Fork meta
 
-For the full model, see [Tentacles](docs/concepts/tentacles.md) and [Working With Todos](docs/guides/working-with-todos.md).
+| Commit | Area | Summary |
+|---|---|---|
+| `0c12dec` | Fork | `package.json` renamed `octogent` → `octogent-evolved`, version bumped `0.1.0` → `0.2.0`, repository URL updated, `NOTICE.md` added, README attribution. Bin stays `octogent`. |
 
-## Claude Code Managing Claude Code
+Full history: `git log main --first-parent`.
 
-One of the main ideas here is that **Claude Code** should not only be treated as a single terminal session waiting for a human prompt. In Octogent, one Claude Code agent can coordinate other Claude Code agents, assign them specific jobs, and exchange short messages with them while the human stays at the orchestration layer.
+---
 
-This is different from Claude Code's subagent spawning, since it allows you to directly see and control what each worker agent is doing.
+## Install (fork-specific)
 
-That means Octogent is not just a dashboard for multiple terminals. It is also a way to structure parent-worker behavior around scoped tasks and shared context files.
+This fork is **not published to npm**. Install from the repo directly.
 
-For the current model, see [Orchestrating Child Agents](docs/guides/orchestrating-child-agents.md) and [Inter-Agent Messaging](docs/guides/inter-agent-messaging.md).
+### Option A — git clone + `npm link` (recommended for dev)
 
-## How It Works
+```bash
+git clone https://github.com/special-place-administrator/Octogent-Evolved.git
+cd Octogent-Evolved
+pnpm install
+pnpm build
+npm link
+```
 
-1. Create a tentacle for a scoped slice of work.
-2. Store context, notes, and `todo.md` inside that tentacle so the agent has durable, local guidance.
-3. Run one or more agent terminals against that tentacle, and delegate child work from the task list when needed.
-4. Use the local API and web UI to monitor sessions, messages, transcripts, and worktree state.
+After `npm link`, the global `octogent` command points at this checkout. Edit sources, re-run `pnpm build`, restart the server — changes are live. **Do not run `npm i -g octogent`** — that pulls the upstream registry version and silently overwrites the symlink.
+
+### Option B — install from tarball (for a coworker / second machine)
+
+On the machine that has the repo built:
+
+```bash
+cd Octogent-Evolved
+npm pack
+# produces octogent-evolved-0.2.0.tgz
+```
+
+On the target machine:
+
+```bash
+npm install -g ./octogent-evolved-0.2.0.tgz
+```
+
+### Option C — install directly from GitHub
+
+```bash
+npm install -g git+https://github.com/special-place-administrator/Octogent-Evolved.git
+```
+
+(This clones + installs the current `main` in one step. The target machine needs `git`, `pnpm`, and Node 22+.)
 
 ## Quick start
 
-<details>
-<summary><strong>Local development</strong></summary>
-
 ```bash
-pnpm install
-pnpm dev
-```
-
-This starts the API and web app for local development.
-
-</details>
-
-<details open>
-<summary><strong>Current install status</strong></summary>
-
-```bash
-Octogent is not published to the npm registry yet.
-```
-
-For local development:
-
-```bash
-pnpm install
-pnpm dev
-```
-
-For a local global CLI install from a clone:
-
-```bash
-pnpm install
-pnpm build
-npm install -g .
+cd <your-project>
 octogent
 ```
 
-The registry install flow `npm install -g octogent` will only work after the package is published.
-
-</details>
-
-On first run, **Octogent** creates the local `.octogent/` scaffold automatically, assigns a stable project ID, picks an available local API port starting at `8787`, and opens the UI unless `OCTOGENT_NO_OPEN=1` is set.
+On first run, Octogent creates the local `.octogent/` scaffold, assigns a stable project ID, picks an available local API port starting at `8787`, and opens the UI unless `OCTOGENT_NO_OPEN=1` is set.
 
 ## Requirements
 
 - Node.js `22+`
-- `claude` installed for the supported agent workflow
+- `claude` installed (the Claude Code CLI — the supported agent)
 - `git` for worktree terminals
-- `gh` for GitHub pull request features
-- `curl` for the current Claude hook callback flow
+- `gh` for GitHub pull-request features
+- `curl` for the Claude hook callback flow
+- `pnpm@11+` for dev builds
 
 Startup fails if neither `claude` nor another supported provider binary is installed. The current docs only cover **Claude Code**.
 
 ## What persists
 
-- `.octogent/` keeps project-local scaffold and worktrees
-- `~/.octogent/projects/<project-id>/state/` keeps runtime state, transcripts, monitor cache, and metadata
-- `.octogent/tentacles/<tentacle-id>/` keeps the context files and todos that agents read
+- `.octogent/` — project-local scaffold and worktrees
+- `~/.octogent/projects/<project-id>/state/` — runtime state, transcripts, monitor cache, metadata
+- `.octogent/tentacles/<tentacle-id>/` — context files and todos that agents read
 
-PTY sessions survive browser reloads during the idle grace period, but they do **not** survive an API restart.
+PTY sessions survive browser reloads during the idle grace period. They do **not** survive an API restart. A restart deletes in-flight channel queues.
 
-## Docs
+## How the swarm flow works now
 
-- [Docs Home](docs/index.md)
-- [Installation](docs/getting-started/installation.md)
-- [Quickstart](docs/getting-started/quickstart.md)
-- [Mental Model](docs/concepts/mental-model.md)
+1. **Planner** (`prompts/tentacle-planner.md`) proposes a tentacle layout, gets operator approval, writes `CONTEXT.md` + `todo.md` into the tentacle folder.
+2. **Spawn Swarm** button — operator picks worker count (1–9). API allocates claim-indexed worker IDs, spawns worker terminals in their own worktrees with a 500 ms stagger. Last, it spawns the coordinator in shared-mode with the same tentacle scope.
+3. **Workers** read `CONTEXT.md` / `todo.md`, pick an unclaimed `- [ ]` item, implement it, run verification, commit to `octogent/<worker-id>`, and end their **final commit body** with a `DONE:` or `BLOCKED:` marker in the mandated shape.
+4. **Coordinator** runs a 2/5/10-minute tight poll loop (its own tier choice per task size). Each cycle: `git fetch`, check each worker branch for `ahead > 0` + clean worktree, read the last commit body for `DONE:` / `BLOCKED:`. On first delta, exits the poll and either merges or investigates.
+5. **Merges** happen into an integration branch first (`octogent_integration_<tentacle>`), then into `main` after post-merge verification passes.
+6. **Channel messages** (inter-agent IPC) are optional fire-and-forget status; if channel-send fails, the commit is still the real signal.
+
+## Docs (upstream)
+
+Mental model and conceptual docs are inherited from upstream and remain accurate. Swarm-specific docs will be refreshed here as part of future divergence:
+
 - [Tentacles](docs/concepts/tentacles.md)
-- [Runtime and API](docs/concepts/runtime-and-api.md)
 - [Working With Todos](docs/guides/working-with-todos.md)
 - [Orchestrating Child Agents](docs/guides/orchestrating-child-agents.md)
 - [Inter-Agent Messaging](docs/guides/inter-agent-messaging.md)
@@ -180,7 +174,11 @@ PTY sessions survive browser reloads during the idle grace period, but they do *
 - [API Reference](docs/reference/api.md)
 - [Experimental Features](docs/reference/experimental-features.md)
 - [Troubleshooting](docs/reference/troubleshooting.md)
-- [Contributing](CONTRIBUTING.md)
 
-## Contributor setup
-Contributions are welcome 🤗. For contributor workflow and expectations, see [CONTRIBUTING.md](CONTRIBUTING.md).
+## License
+
+MIT, inherited from upstream. See [`LICENSE`](./LICENSE) and [`NOTICE.md`](./NOTICE.md).
+
+## Credit
+
+Original Octogent by [Hesam Sheikh](https://github.com/hesamsheikh). All the design work that makes this thing worth forking belongs to that project.
