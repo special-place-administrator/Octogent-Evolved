@@ -547,7 +547,21 @@ export const App = () => {
               onCanvasOpenTentacleIdsChange: setCanvasOpenTentacleIds,
               onCanvasTerminalsPanelWidthChange: setCanvasTerminalsPanelWidth,
               onCreateAgent: async (tentacleId, workspaceMode) => {
-                return await createTerminal(workspaceMode ?? "shared", undefined, tentacleId);
+                const response = await fetch("/api/terminals", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    workspaceMode: workspaceMode ?? "shared",
+                    tentacleId,
+                    agentProvider: "claude-code",
+                    promptTemplate: "tentacle-worker",
+                    promptVariables: { tentacleId },
+                  }),
+                });
+                if (!response.ok) return undefined;
+                const snapshot = (await response.json()) as { terminalId?: string };
+                await refreshColumns();
+                return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
               },
               onCreateTerminal: async () => {
                 return await createTerminal("shared", undefined, OCTOBOSS_ID);
