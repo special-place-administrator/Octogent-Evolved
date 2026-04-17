@@ -787,11 +787,11 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
             `Your parent coordinator is at terminal \`${parentTerminalId}\`.`,
             "When you complete your task, report back:",
             "```bash",
-            `node bin/octogent channel send ${parentTerminalId} "DONE: ${item.text}" --from ${workerTerminalId}`,
+            `octogent channel send ${parentTerminalId} "DONE: ${item.text}" --from ${workerTerminalId}`,
             "```",
             "If you are blocked, ask for help:",
             "```bash",
-            `node bin/octogent channel send ${parentTerminalId} "BLOCKED: <describe what you need>" --from ${workerTerminalId}`,
+            `octogent channel send ${parentTerminalId} "BLOCKED: <describe what you need>" --from ${workerTerminalId}`,
             "```",
           ].join("\n");
 
@@ -812,7 +812,7 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
           });
 
           const commandParts = [
-            "node bin/octogent terminal create",
+            "octogent terminal create",
             `--terminal-id ${shellSingleQuote(workerTerminalId)}`,
             `--tentacle-id ${shellSingleQuote(tentacleId)}`,
             `--parent-terminal-id ${shellSingleQuote(parentTerminalId)}`,
