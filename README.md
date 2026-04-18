@@ -55,7 +55,8 @@ This fork began on `fix/swarm-orchestration` with the goal of making the swarm f
 | `fd66f50` | Worker flow | Six-fix polish batch for GUI-native orchestration (template variable threading, context-menu scoping, misc). |
 | `2cbf7de` | Runtime | Tentacle-scoped worktrees now persist across terminal cascade cleanup. Free-standing worker worktrees still auto-clean. |
 | `f2a8392` | Swarm spawn | API spawns all workers directly instead of asking the parent to shell-exec them. Adds claim-based idempotent spawn and a worker-count picker (1–9) in the panel. |
-| `2c322d6` | PTY | Fixes the "[Pasted text #1 +N lines]" staging race where multiple concurrent spawns left prompts unsubmitted. `INITIAL_PROMPT_SUBMIT_DELAY_MS` bumped to 2000 ms + 500 ms stagger between worker spawns. |
+| `2c322d6` | PTY | First-pass timing fix for the "[Pasted text #1 +N lines]" staging race where multiple concurrent spawns left prompts unsubmitted. `INITIAL_PROMPT_SUBMIT_DELAY_MS` bumped to 2000 ms + 500 ms stagger between worker spawns. Superseded by `19b9bd5`. |
+| `19b9bd5` | PTY | Replaces the fixed-timer paste-and-pray bootstrap for claude-code with a signal-gated state machine that waits on the existing `notification.idle_prompt` and `user-prompt-submit` hook callbacks before advancing each phase. Retries the bracketed paste up to 3 times when `idle_prompt` re-fires without a submit (the "Enter got eaten" case). Legacy timer schedule is preserved as the fallback when hook callbacks don't arrive, plus a kill switch via `OCTOGENT_HOOK_GATED_BOOTSTRAP=0`. Fixes the 5+ concurrent worker case where 2–3 workers and the coordinator would stage paste without submitting. Six new tests drive the state machine deterministically via the hook API. |
 
 ### Swarm contract rewrite
 
