@@ -157,6 +157,30 @@ export const createTerminalRuntime = ({
   });
   drainPendingHookEventsRef = hookProcessor.drainPendingHookEvents;
 
+  // Refresh hook URLs in every existing claude-code worktree's
+  // .claude/settings.json. Hook commands bake the API base URL at install
+  // time. When the server restarts on a different port (our port auto-
+  // pick walks 8787..), any terminal from a previous session still has
+  // the stale URL baked in — every PreToolUse/PostToolUse/Notification
+  // hook fires curl against the dead port and shows `ECONNREFUSED` in
+  // the agent's output. Re-running `installHooksInDirectory` with the
+  // current URL strips previously-installed octogent entries (see
+  // `isOctogentOwnedHookEntry`) and writes fresh ones with the new URL.
+  // User-authored hooks in the same settings.json are preserved.
+  for (const terminal of terminals.values()) {
+    if (terminal.agentProvider !== "claude-code") continue;
+    if (terminal.workspaceMode !== "worktree") continue;
+    try {
+      const worktreeIdentifier = terminal.worktreeId ?? terminal.tentacleId;
+      const worktreeCwd = worktreeManager.getTentacleWorkspaceCwd(worktreeIdentifier);
+      hookProcessor.installHooksInDirectory(worktreeCwd);
+    } catch {
+      // Best-effort: worktree may have been deleted out of band, or
+      // the settings.json may be read-only. Either way, the existing
+      // stale hooks are no worse than the pre-fix state.
+    }
+  }
+
   const allocateTerminalId = () => {
     let candidateNumber = 1;
     while (candidateNumber < Number.MAX_SAFE_INTEGER) {

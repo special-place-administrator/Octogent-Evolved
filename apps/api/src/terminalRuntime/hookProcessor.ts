@@ -56,6 +56,22 @@ export const createHookProcessor = (deps: {
     }
   };
 
+  // Identify hook entries we installed ourselves, so re-running install
+  // with a different API base URL replaces them instead of duplicating
+  // them. We fingerprint on the octogent API paths that appear in every
+  // hook we emit; a user's own hook that happens to mention those paths
+  // is extraordinarily unlikely, and even then the cost is that the
+  // user's hook gets replaced on next install — a merge, not a data loss.
+  const OCTOGENT_HOOK_FINGERPRINTS = [
+    "/api/hooks/",
+    "/api/code-intel/events",
+  ];
+
+  const isOctogentOwnedHookEntry = (entry: unknown): boolean => {
+    const serialized = JSON.stringify(entry);
+    return OCTOGENT_HOOK_FINGERPRINTS.some((fp) => serialized.includes(fp));
+  };
+
   const mergeHookEntries = (
     existingValue: unknown,
     eventName: string,
@@ -68,11 +84,18 @@ export const createHookProcessor = (deps: {
     const existingEntries = Array.isArray(nextHooks[eventName])
       ? [...(nextHooks[eventName] as unknown[])]
       : [];
-    const mergedEntries = [...existingEntries];
+
+    // Strip any previously-installed octogent entries so we can re-install
+    // with the current URL. User-authored entries (not fingerprinted as
+    // octogent-owned) are preserved as-is.
+    const preservedUserEntries = existingEntries.filter(
+      (entry) => !isOctogentOwnedHookEntry(entry),
+    );
+    const mergedEntries = [...preservedUserEntries];
 
     for (const nextEntry of nextEntries) {
       const serializedNextEntry = JSON.stringify(nextEntry);
-      const alreadyPresent = existingEntries.some(
+      const alreadyPresent = preservedUserEntries.some(
         (existingEntry) => JSON.stringify(existingEntry) === serializedNextEntry,
       );
       if (!alreadyPresent) {
