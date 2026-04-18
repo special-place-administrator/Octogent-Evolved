@@ -335,11 +335,6 @@ export const createHookProcessor = (deps: {
           ...(session.lastToolName ? { toolName: session.lastToolName } : {}),
         });
       } else if (notificationType === "idle_prompt") {
-        session.agentState = "idle";
-        session.stateTracker.forceState("idle");
-        onStateChange?.(octogentSessionId, "idle");
-        broadcastMessage(session, { type: "state", state: "idle" });
-
         // Bump the idle-prompt counter so the bootstrap state machine can
         // detect "claude TUI is sitting at input" transitions. Every bump
         // represents one fresh-from-idle moment: first boot, recovery from
@@ -347,7 +342,18 @@ export const createHookProcessor = (deps: {
         // paste was consumed without a submit (the eaten-Enter case).
         session.idlePromptCount = (session.idlePromptCount ?? 0) + 1;
 
-        // Deliver any queued channel messages now that the agent is idle.
+        // Deliberately do NOT force agentState to "idle" here. Claude Code
+        // fires `idle_prompt` more generously than "user has been idle for
+        // a while" — it fires between tool calls, after paste rendering,
+        // and at other short TUI-idle moments during active processing.
+        // Using it as the authoritative "return to idle" signal flipped
+        // the UI badge to IDLE while the agent was still visibly thinking
+        // or invoking tools. `Stop` is the correct one-per-turn signal
+        // for that transition; see the Stop hook handler below.
+
+        // Still deliver any queued channel messages now that the agent
+        // has reached an input-ready moment — channel-message delivery is
+        // idempotent and firing it on either idle_prompt or Stop is safe.
         deliverChannelMessages(octogentSessionId);
       }
 
@@ -439,6 +445,22 @@ export const createHookProcessor = (deps: {
 
     if (hookName !== "stop") {
       return { ok: true };
+    }
+
+    // Stop fires once per agent turn — this is the authoritative "claude
+    // finished responding, back to idle" signal. Do the state flip BEFORE
+    // the transcript-path guards below so state recovers even on payload
+    // shape anomalies. Skipped only if session doesn't exist (no PTY to
+    // broadcast to).
+    if (octogentSessionId) {
+      const stopSession = sessions.get(octogentSessionId);
+      if (stopSession) {
+        stopSession.agentState = "idle";
+        stopSession.lastToolName = undefined;
+        stopSession.stateTracker.forceState("idle");
+        onStateChange?.(octogentSessionId, "idle");
+        broadcastMessage(stopSession, { type: "state", state: "idle" });
+      }
     }
 
     const hookPayload = payload as Record<string, unknown>;
