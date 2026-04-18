@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { logVerbose } from "../logging";
@@ -85,25 +85,16 @@ export const createHookProcessor = (deps: {
       ? [...(nextHooks[eventName] as unknown[])]
       : [];
 
-    // Strip any previously-installed octogent entries so we can re-install
-    // with the current URL. User-authored entries (not fingerprinted as
-    // octogent-owned) are preserved as-is.
+    // Contract: on every install, octogent-owned entries are regenerated
+    // from scratch. Strip all entries matching the octogent fingerprint
+    // (old shape, stale URL, anything) and append the freshly-generated
+    // entries after the user's preserved entries. No dedup against user
+    // entries — a byte-identical user hook would stop us from emitting
+    // our own, and that silent skip is worse than a harmless duplicate.
     const preservedUserEntries = existingEntries.filter(
       (entry) => !isOctogentOwnedHookEntry(entry),
     );
-    const mergedEntries = [...preservedUserEntries];
-
-    for (const nextEntry of nextEntries) {
-      const serializedNextEntry = JSON.stringify(nextEntry);
-      const alreadyPresent = preservedUserEntries.some(
-        (existingEntry) => JSON.stringify(existingEntry) === serializedNextEntry,
-      );
-      if (!alreadyPresent) {
-        mergedEntries.push(nextEntry);
-      }
-    }
-
-    nextHooks[eventName] = mergedEntries;
+    nextHooks[eventName] = [...preservedUserEntries, ...nextEntries];
     return nextHooks;
   };
 
@@ -209,7 +200,28 @@ export const createHookProcessor = (deps: {
       }
 
       mergedSettings.hooks = mergedHooks;
-      writeFileSync(targetSettingsPath, `${JSON.stringify(mergedSettings, null, 2)}\n`, "utf8");
+
+      // Atomic write: a crash between these two calls leaves the existing
+      // settings.json intact. writeFileSync is not atomic on any platform;
+      // a direct overwrite would truncate the file first and then write,
+      // so a crash mid-write leaves a corrupt or empty settings.json that
+      // Claude Code can no longer parse.
+      const tempPath = `${targetSettingsPath}.tmp`;
+      const serialized = `${JSON.stringify(mergedSettings, null, 2)}\n`;
+      try {
+        writeFileSync(tempPath, serialized, "utf8");
+        renameSync(tempPath, targetSettingsPath);
+      } catch (writeError) {
+        // Clean up the temp file if rename failed; don't mask the
+        // original error if cleanup also fails.
+        try {
+          unlinkSync(tempPath);
+        } catch {
+          // Best-effort: the temp file may not exist (writeFileSync failed
+          // before creating it) or be locked; either way not worth masking.
+        }
+        throw writeError;
+      }
     } catch {
       // Best-effort
     }

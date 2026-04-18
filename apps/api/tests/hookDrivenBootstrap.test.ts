@@ -539,4 +539,118 @@ describe("hook-gated bootstrap", () => {
       expect(pasteCount).toBeGreaterThanOrEqual(1);
     }
   });
+
+  // T7: upgrade path. User had an older octogent install that wrote
+  // type:"http" hooks; re-running installHooksInDirectory must strip
+  // those and emit fresh type:"command" curl entries, without touching
+  // user-authored hooks.
+  it("T7: freshly regenerates octogent hooks and strips stale type:http entries on reinstall", () => {
+    const deps = createFakeDeps();
+    tempDirs.push(deps.tmpDir);
+    const claudeDir = join(deps.tmpDir, ".claude");
+    const settingsPath = join(claudeDir, "settings.json");
+
+    const staleSettings = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: "*",
+            hooks: [
+              { type: "command", command: "echo 'user hook'", timeout: 5 },
+            ],
+          },
+        ],
+        PreToolUse: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "http",
+                url: "http://old-host:9999/api/hooks/pre-tool-use",
+                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
+                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+        PostToolUse: [
+          {
+            matcher: "Edit|Write",
+            hooks: [
+              {
+                type: "http",
+                url: "http://old-host:9999/api/code-intel/events",
+                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
+                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+        Notification: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "http",
+                url: "http://old-host:9999/api/hooks/notification",
+                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
+                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    require("node:fs").mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(staleSettings, null, 2), "utf8");
+
+    const { hookProcessor } = buildWiredRuntime(deps);
+    hookProcessor.installHooksInDirectory(deps.tmpDir);
+
+    const merged = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      hooks: Record<
+        string,
+        Array<{
+          matcher?: string;
+          hooks: Array<{ type: string; command?: string; url?: string }>;
+        }>
+      >;
+    };
+
+    // No stale type:"http" entries survived anywhere.
+    const allHooks = Object.values(merged.hooks).flatMap((group) =>
+      group.flatMap((entry) => entry.hooks),
+    );
+    const httpEntries = allHooks.filter((h) => h.type === "http");
+    expect(httpEntries).toEqual([]);
+
+    // User's SessionStart hook was preserved unchanged.
+    const sessionStartCommands = (merged.hooks.SessionStart ?? [])
+      .flatMap((entry) => entry.hooks)
+      .map((h) => h.command);
+    expect(sessionStartCommands).toContain("echo 'user hook'");
+
+    // Fresh command entries exist for each of the three converted hooks,
+    // pointing at the current API base (not the stale old-host URL).
+    const collectCommands = (event: string): string[] =>
+      (merged.hooks[event] ?? [])
+        .flatMap((entry) => entry.hooks)
+        .map((h) => h.command ?? "");
+
+    const preToolUseCommands = collectCommands("PreToolUse");
+    expect(preToolUseCommands.some((c) => c.startsWith("curl -s -X POST"))).toBe(true);
+    expect(preToolUseCommands.some((c) => c.includes("/api/hooks/pre-tool-use"))).toBe(true);
+    expect(preToolUseCommands.some((c) => c.includes("old-host:9999"))).toBe(false);
+
+    const postToolUseCommands = collectCommands("PostToolUse");
+    expect(postToolUseCommands.some((c) => c.includes("/api/code-intel/events"))).toBe(true);
+    expect(postToolUseCommands.some((c) => c.includes("old-host:9999"))).toBe(false);
+
+    const notificationCommands = collectCommands("Notification");
+    expect(notificationCommands.some((c) => c.includes("/api/hooks/notification"))).toBe(true);
+    expect(notificationCommands.some((c) => c.includes("old-host:9999"))).toBe(false);
+  });
 });
