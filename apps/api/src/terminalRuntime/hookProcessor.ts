@@ -143,10 +143,8 @@ export const createHookProcessor = (deps: {
             matcher: "*",
             hooks: [
               {
-                type: "http",
-                url: `${apiBaseUrl}/api/hooks/pre-tool-use`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                type: "command",
+                command: `curl -s -X POST "${apiBaseUrl}/api/hooks/pre-tool-use" -H 'Content-Type: application/json' -H "X-Octogent-Session: $OCTOGENT_SESSION_ID" -d @- || true`,
                 timeout: 5,
               },
             ],
@@ -157,10 +155,8 @@ export const createHookProcessor = (deps: {
             matcher: "Edit|Write",
             hooks: [
               {
-                type: "http",
-                url: `${apiBaseUrl}/api/code-intel/events`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                type: "command",
+                command: `curl -s -X POST "${apiBaseUrl}/api/code-intel/events" -H 'Content-Type: application/json' -H "X-Octogent-Session: $OCTOGENT_SESSION_ID" -d @- || true`,
                 timeout: 5,
               },
             ],
@@ -171,10 +167,8 @@ export const createHookProcessor = (deps: {
             matcher: "*",
             hooks: [
               {
-                type: "http",
-                url: `${apiBaseUrl}/api/hooks/notification`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
+                type: "command",
+                command: `curl -s -X POST "${apiBaseUrl}/api/hooks/notification" -H 'Content-Type: application/json' -H "X-Octogent-Session: $OCTOGENT_SESSION_ID" -d @- || true`,
                 timeout: 5,
               },
             ],
