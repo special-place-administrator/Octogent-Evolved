@@ -334,21 +334,29 @@ describe("hook-gated bootstrap", () => {
     expect(pty.writes.filter((w) => w === "\r").length).toBeGreaterThanOrEqual(1);
   });
 
-  // T4: paste-eaten retry. First paste+\r is consumed (no user-prompt-submit
-  // fires), then idle_prompt re-fires (claude returned to idle without
-  // processing our prompt). State machine must re-paste and re-submit.
-  it("T4: retries paste when idle_prompt re-fires without a submit", async () => {
+  // T4: regression test for the double-paste bug. Claude Code fires
+  // `idle_prompt` the moment its TUI renders `[Pasted text +N lines]` —
+  // BEFORE processing our \r. An earlier iteration of the state machine
+  // treated that idle event as "paste eaten, retry", which caused every
+  // worker to receive the prompt twice (primary-source observation from
+  // a real swarm run).
+  //
+  // Correct behavior: only `user-prompt-submit` confirms the paste
+  // landed, and retries use a bare \r — never re-paste. `idle_prompt`
+  // during the submit-wait window is noise and must not trigger a
+  // re-paste.
+  it("T4: idle_prompt between paste and submit does NOT cause a retry", async () => {
     const deps = createFakeDeps();
     tempDirs.push(deps.tmpDir);
     const pty = new FakePty();
     spawnMock.mockReturnValue(pty);
 
     const { sessionRuntime, hookProcessor } = buildWiredRuntime(deps);
-    registerClaudeTerminal(deps.terminals, "tentacle-4", "retry prompt");
+    registerClaudeTerminal(deps.terminals, "tentacle-4", "no-duplicate prompt");
 
     sessionRuntime.startSession("tentacle-4");
 
-    // Get through phases 1 and 2.
+    // Progress through phases 1 and 2.
     fireIdlePrompt(hookProcessor, "tentacle-4");
     await vi.waitFor(
       () => expect(pty.writes).toContain("/effort auto\r"),
@@ -356,35 +364,38 @@ describe("hook-gated bootstrap", () => {
     );
     fireIdlePrompt(hookProcessor, "tentacle-4");
 
-    // First paste lands.
+    // Paste lands.
     await vi.waitFor(
       () => {
-        const c = pty.writes.filter((w) =>
-          w.includes(`${BRACKETED_PASTE_START}retry prompt${BRACKETED_PASTE_END}`),
+        const count = pty.writes.filter((w) =>
+          w.includes(`${BRACKETED_PASTE_START}no-duplicate prompt${BRACKETED_PASTE_END}`),
         ).length;
-        expect(c).toBeGreaterThanOrEqual(1);
+        expect(count).toBeGreaterThanOrEqual(1);
       },
       { timeout: 2000, interval: 20 },
     );
 
-    // Simulate claude eating the paste: idle_prompt fires again without
-    // a user-prompt-submit in between.
-    await new Promise((r) => setTimeout(r, 500));
+    // Simulate what Claude Code actually does: fires idle_prompt AFTER
+    // the paste renders (TUI is sitting idle waiting for Enter). The
+    // previous implementation misread this as "paste eaten, retry" and
+    // re-pasted.
     fireIdlePrompt(hookProcessor, "tentacle-4");
 
-    // State machine should retry — second paste of same content.
-    await vi.waitFor(
-      () => {
-        const c = pty.writes.filter((w) =>
-          w.includes(`${BRACKETED_PASTE_START}retry prompt${BRACKETED_PASTE_END}`),
-        ).length;
-        expect(c).toBeGreaterThanOrEqual(2);
-      },
-      { timeout: 2000, interval: 20 },
-    );
+    // Give the state machine time to (incorrectly) react to the idle
+    // signal. With the fix, it ignores idle during submit wait.
+    await new Promise((r) => setTimeout(r, 300));
 
-    // Second attempt succeeds.
-    fireUserPromptSubmit(hookProcessor, "tentacle-4", "retry prompt");
+    // Confirm the happy path: submit lands shortly after.
+    fireUserPromptSubmit(hookProcessor, "tentacle-4", "no-duplicate prompt");
+
+    // Let the state machine notice the submit and exit.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Regression assertion: exactly ONE paste sequence was written.
+    const pasteCount = pty.writes.filter((w) =>
+      w.includes(`${BRACKETED_PASTE_START}no-duplicate prompt${BRACKETED_PASTE_END}`),
+    ).length;
+    expect(pasteCount).toBe(1);
   });
 
   // T5: coexistence. User's existing `.claude/settings.json` defines their

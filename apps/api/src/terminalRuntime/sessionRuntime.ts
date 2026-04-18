@@ -355,7 +355,10 @@ export const createSessionRuntime = ({
   const HOOK_EFFORT_IDLE_TIMEOUT_MS = 5_000;
   const HOOK_SUBMIT_TIMEOUT_MS = 5_000;
   const PASTE_RENDER_DELAY_MS = 400;
-  const MAX_PASTE_ATTEMPTS = 3;
+  // How many total submit attempts we make: the first is paste + \r, any
+  // subsequent attempts are bare \r (never re-paste — that would duplicate
+  // the prompt body in the submitted message).
+  const MAX_SUBMIT_ATTEMPTS = 3;
   const HOOK_POLL_INTERVAL_MS = 50;
 
   type CounterKey = "idlePromptCount" | "userPromptSubmitCount";
@@ -481,34 +484,44 @@ export const createSessionRuntime = ({
       await new Promise<void>((resolve) => setTimeout(resolve, CLAUDE_SLASH_COMMAND_DELAY_MS));
     }
 
-    // Phase: inject initial prompt with retry on paste-eaten.
+    // Phase: inject initial prompt, then wait for submit confirmation.
+    //
+    // We intentionally do NOT treat idle_prompt as a retry trigger. Primary-
+    // source observation: Claude Code fires idle_prompt the moment its TUI
+    // renders "[Pasted text +N lines]" — BEFORE our \r is processed. That
+    // idle event is indistinguishable from "my Enter was eaten and claude
+    // is still idle waiting". Racing submit vs idle caused false retries
+    // that double-pasted the prompt on the happy path. (Empirically
+    // verified by the user: every worker got the prompt injected twice.)
+    //
+    // Correct strategy: paste once, wait for user-prompt-submit with a
+    // timeout. If the submit doesn't confirm, retry with a BARE `\r` only
+    // — never re-paste. A bare \r either submits the staged paste (fixing
+    // the original eaten-Enter bug) or becomes a harmless empty submission
+    // (when paste already submitted and we just didn't see the hook). It
+    // can never cause a duplicate prompt body.
     if (session.initialPrompt && !session.isInitialPromptSent) {
       session.isInitialPromptSent = true;
       const prompt = session.initialPrompt;
 
+      appendDebugLog(session, `initial-prompt session=${sessionId} path=hook`);
+      const submitBeforePaste = session.userPromptSubmitCount ?? 0;
+      session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
+      await new Promise<void>((resolve) => setTimeout(resolve, PASTE_RENDER_DELAY_MS));
+      appendDebugLog(session, `initial-prompt-submit session=${sessionId} path=hook attempt=1`);
+      session.pty.write("\r");
+
       let landed = false;
-      for (let attempt = 1; attempt <= MAX_PASTE_ATTEMPTS; attempt++) {
-        const submitBefore = session.userPromptSubmitCount ?? 0;
-        const idleBefore = session.idlePromptCount ?? 0;
-
-        appendDebugLog(
-          session,
-          `initial-prompt session=${sessionId} path=hook attempt=${attempt}`,
-        );
-        session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
-        await new Promise<void>((resolve) => setTimeout(resolve, PASTE_RENDER_DELAY_MS));
-        appendDebugLog(
-          session,
-          `initial-prompt-submit session=${sessionId} path=hook attempt=${attempt}`,
-        );
-        session.pty.write("\r");
-
+      for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
         const signal = await waitForCounterIncrement(
           sessionId,
           session,
           [
-            { key: "userPromptSubmitCount", baseline: submitBefore, label: "submit" },
-            { key: "idlePromptCount", baseline: idleBefore, label: "idle" },
+            {
+              key: "userPromptSubmitCount",
+              baseline: submitBeforePaste,
+              label: "submit",
+            },
           ],
           HOOK_SUBMIT_TIMEOUT_MS,
         );
@@ -524,25 +537,24 @@ export const createSessionRuntime = ({
           landed = true;
           break;
         }
-        if (signal === "idle") {
-          // idle_prompt re-fired after our paste+\r = our input was eaten.
-          // Retry the whole paste sequence on the next loop iteration.
+
+        // Timeout: submit hasn't been observed. Send one more bare \r in
+        // case the paste is staged but our original Enter was consumed by
+        // paste finalization. Never re-paste — that's how we get
+        // duplicates.
+        if (attempt < MAX_SUBMIT_ATTEMPTS) {
           appendDebugLog(
             session,
-            `initial-prompt-eaten-retry session=${sessionId} attempt=${attempt}`,
+            `initial-prompt-bare-retry session=${sessionId} attempt=${attempt + 1}`,
           );
-          continue;
+          session.pty.write("\r");
         }
-        appendDebugLog(
-          session,
-          `initial-prompt-signal-timeout session=${sessionId} attempt=${attempt}`,
-        );
       }
 
       if (!landed) {
         appendDebugLog(
           session,
-          `initial-prompt-gave-up session=${sessionId} attempts=${MAX_PASTE_ATTEMPTS}`,
+          `initial-prompt-gave-up session=${sessionId} attempts=${MAX_SUBMIT_ATTEMPTS}`,
         );
       }
     }
