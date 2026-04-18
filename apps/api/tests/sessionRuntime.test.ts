@@ -121,6 +121,24 @@ describe("createSessionRuntime", () => {
     temporaryDirectories.length = 0;
   });
 
+  // The bootstrap tests below assert exact timer-driven write ordering
+  // (claude command → 4s → paste → 150ms → Enter). That matches the legacy
+  // fixed-timer path only. The hook-gated path (default in production)
+  // waits on idle_prompt/user-prompt-submit callbacks and is covered by
+  // hookDrivenBootstrap.test.ts. Pin these legacy tests to the legacy
+  // path explicitly so they stay deterministic.
+  const pinLegacyBootstrap = () => {
+    const previous = process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP;
+    process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = "0";
+    return () => {
+      if (previous === undefined) {
+        delete process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP;
+      } else {
+        process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = previous;
+      }
+    };
+  };
+
   it("keeps a session alive across reconnects and replays scrollback history", () => {
     const tentacleId = "tentacle-1";
     const terminals = new Map<string, PersistedTerminal>([
@@ -454,7 +472,9 @@ describe("createSessionRuntime", () => {
   });
 
   it("can start a prompted session headlessly and submits the prompt automatically", () => {
+    const restoreBootstrapMode = pinLegacyBootstrap();
     vi.useFakeTimers();
+    try {
 
     const tentacleId = "tentacle-1";
     const terminals = new Map<string, PersistedTerminal>([
@@ -490,25 +510,37 @@ describe("createSessionRuntime", () => {
 
     expect(runtime.startSession(tentacleId)).toBe(true);
     expect(sessions.has(tentacleId)).toBe(true);
-    expect(pty.write).toHaveBeenNthCalledWith(1, "claude\r");
+    expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
 
+    // Legacy claude-code bootstrap schedule:
+    //   t+4000ms  → "/effort auto\r"
+    //   t+4600ms  → bracketed-paste initial prompt
+    //   t+6600ms  → "\r" submit
     vi.advanceTimersByTime(4_000);
+    expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
+
+    vi.advanceTimersByTime(600);
     expect(pty.write).toHaveBeenNthCalledWith(
-      2,
+      3,
       "\u001b[200~Investigate and report back.\u001b[201~",
     );
 
-    vi.advanceTimersByTime(150);
-    expect(pty.write).toHaveBeenNthCalledWith(3, "\r");
+    vi.advanceTimersByTime(2_000);
+    expect(pty.write).toHaveBeenNthCalledWith(4, "\r");
 
     vi.advanceTimersByTime(10_000);
     expect(sessions.has(tentacleId)).toBe(true);
 
     runtime.close();
+    } finally {
+      restoreBootstrapMode();
+    }
   });
 
   it("pastes an initial input draft without submitting it", () => {
+    const restoreBootstrapMode = pinLegacyBootstrap();
     vi.useFakeTimers();
+    try {
 
     const tentacleId = "tentacle-1";
     const terminals = new Map<string, PersistedTerminal>([
@@ -548,15 +580,24 @@ describe("createSessionRuntime", () => {
       runtime.handleUpgrade(createUpgradeRequest(tentacleId), {} as Duplex, Buffer.alloc(0)),
     ).toBe(true);
 
-    expect(pty.write).toHaveBeenNthCalledWith(1, "claude\r");
+    expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
 
+    // Legacy claude-code bootstrap for a DRAFT (no initial prompt, just a
+    // pre-filled input buffer): /effort auto at +4000ms, draft paste at
+    // +4600ms, then no Enter (the user submits manually).
     vi.advanceTimersByTime(4_000);
-    expect(pty.write).toHaveBeenNthCalledWith(2, "\u001b[200~You are working on docs.\u001b[201~");
+    expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
 
-    vi.advanceTimersByTime(150);
-    expect(pty.write).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(600);
+    expect(pty.write).toHaveBeenNthCalledWith(3, "\u001b[200~You are working on docs.\u001b[201~");
+
+    vi.advanceTimersByTime(2_000);
+    expect(pty.write).toHaveBeenCalledTimes(3);
 
     runtime.close();
+    } finally {
+      restoreBootstrapMode();
+    }
   });
 
   it("reports runtime state changes through the state-change callback", () => {

@@ -198,6 +198,43 @@ export const createHookProcessor = (deps: {
     }
   };
 
+  // TOCTOU buffer: `installHooksInDirectory` writes `.claude/settings.json`
+  // before `sessionRuntime.startSession` puts the session in the map.
+  // Under heavy concurrent spawns, Claude Code on a fast machine *could*
+  // fire a hook before the session exists in `sessions`. Without this
+  // buffer, `handleHook` silently no-ops and the bootstrap state machine
+  // waits forever. We hold events for up to 10s and replay on session
+  // registration. Buffered hook types are limited to bootstrap signals
+  // (`session-start`, `notification`, `user-prompt-submit`) — other hooks
+  // are advisory and safe to drop.
+  const PENDING_HOOK_TTL_MS = 10_000;
+  // Only hooks that the bootstrap state machine gates on get buffered.
+  // `user-prompt-submit` is intentionally NOT buffered: its primary side
+  // effect is auto-rename, which operates on the terminal record (not the
+  // session), so it already works correctly when the session hasn't been
+  // registered yet. For the bootstrap state machine's submit-confirmation
+  // path, the session is guaranteed to exist by the time we write `\r` —
+  // the state machine itself runs after `sessions.set`.
+  const BUFFERABLE_HOOK_NAMES = new Set(["session-start", "notification"]);
+  type PendingHookEvent = {
+    hookName: string;
+    payload: unknown;
+    receivedAt: number;
+  };
+  const pendingHookEvents = new Map<string, PendingHookEvent[]>();
+
+  const prunePendingEvents = () => {
+    const now = Date.now();
+    for (const [sid, events] of pendingHookEvents.entries()) {
+      const fresh = events.filter((e) => now - e.receivedAt < PENDING_HOOK_TTL_MS);
+      if (fresh.length === 0) {
+        pendingHookEvents.delete(sid);
+      } else if (fresh.length !== events.length) {
+        pendingHookEvents.set(sid, fresh);
+      }
+    }
+  };
+
   const handleHook = (
     hookName: string,
     payload: unknown,
@@ -212,6 +249,41 @@ export const createHookProcessor = (deps: {
     }
 
     const hookPayloadRecord = payload as Record<string, unknown>;
+
+    // If this is a bootstrap-signalling hook and the session hasn't been
+    // registered in the sessions map yet, buffer it. The queue drains
+    // when the session lands in `sessions` via `drainPendingHookEvents`.
+    // This catches the TOCTOU window between `installHooksInDirectory`
+    // (during createTerminal) and `sessions.set` (during startSession).
+    // A fast claude boot under concurrent-spawn load can fire the hook
+    // inside that window; without buffering, the signal is lost and the
+    // bootstrap state machine waits forever for an idle_prompt that
+    // already fired.
+    if (
+      octogentSessionId &&
+      BUFFERABLE_HOOK_NAMES.has(hookName) &&
+      !sessions.has(octogentSessionId)
+    ) {
+      prunePendingEvents();
+      const queue = pendingHookEvents.get(octogentSessionId) ?? [];
+      queue.push({ hookName, payload, receivedAt: Date.now() });
+      pendingHookEvents.set(octogentSessionId, queue);
+      logVerbose(
+        `[Hook] Buffered ${hookName} for unknown session ${octogentSessionId} (size=${queue.length})`,
+      );
+      return { ok: true };
+    }
+
+    if (hookName === "session-start") {
+      if (!octogentSessionId) {
+        return { ok: true };
+      }
+      const session = sessions.get(octogentSessionId);
+      if (session) {
+        session.sessionStartAt = Date.now();
+      }
+      return { ok: true };
+    }
 
     if (hookName === "notification") {
       if (!octogentSessionId) {
@@ -244,6 +316,13 @@ export const createHookProcessor = (deps: {
         session.stateTracker.forceState("idle");
         onStateChange?.(octogentSessionId, "idle");
         broadcastMessage(session, { type: "state", state: "idle" });
+
+        // Bump the idle-prompt counter so the bootstrap state machine can
+        // detect "claude TUI is sitting at input" transitions. Every bump
+        // represents one fresh-from-idle moment: first boot, recovery from
+        // a slash command, or — critically — recovery after our injected
+        // paste was consumed without a submit (the eaten-Enter case).
+        session.idlePromptCount = (session.idlePromptCount ?? 0) + 1;
 
         // Deliver any queued channel messages now that the agent is idle.
         deliverChannelMessages(octogentSessionId);
@@ -303,6 +382,13 @@ export const createHookProcessor = (deps: {
         onStateChange?.(terminal.terminalId, "processing");
         broadcastMessage(activitySession, { type: "state", state: "processing" });
         broadcastMessage(activitySession, { type: "activity" });
+
+        // Bump the submit counter so the bootstrap state machine can
+        // confirm "claude actually received our injected prompt" — the
+        // unambiguous success signal that our bracketed-paste + Enter
+        // landed, not a staged-but-unsubmitted buffer.
+        activitySession.userPromptSubmitCount =
+          (activitySession.userPromptSubmitCount ?? 0) + 1;
       }
 
       // Auto-name the terminal from the first prompt when it still has its default name.
@@ -401,5 +487,22 @@ export const createHookProcessor = (deps: {
     return { ok: true };
   };
 
-  return { handleHook, installHooksInDirectory };
+  // Invoked by sessionRuntime the moment a session is inserted into the
+  // `sessions` map. Replays any hook events that arrived between the hook
+  // install (during createTerminal) and the PTY spawn (during startSession).
+  const drainPendingHookEvents = (octogentSessionId: string) => {
+    const queue = pendingHookEvents.get(octogentSessionId);
+    if (!queue || queue.length === 0) {
+      return;
+    }
+    pendingHookEvents.delete(octogentSessionId);
+    logVerbose(
+      `[Hook] Draining ${queue.length} buffered event(s) for session ${octogentSessionId}`,
+    );
+    for (const event of queue) {
+      handleHook(event.hookName, event.payload, octogentSessionId);
+    }
+  };
+
+  return { handleHook, installHooksInDirectory, drainPendingHookEvents };
 };

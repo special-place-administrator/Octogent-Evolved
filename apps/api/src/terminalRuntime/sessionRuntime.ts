@@ -40,6 +40,10 @@ type CreateSessionRuntimeOptions = {
   sessionIdleGraceMs?: number;
   scrollbackMaxBytes?: number;
   onStateChange?: (terminalId: string, state: AgentRuntimeState, toolName?: string) => void;
+  // Called immediately after a new session is inserted into the sessions
+  // map. Used by the hook processor to drain any buffered hook events
+  // that arrived between `installHooksInDirectory` and `sessions.set`.
+  onSessionRegistered?: (sessionId: string) => void;
 };
 
 const ANSI_BEL = String.fromCharCode(0x07);
@@ -61,6 +65,7 @@ export const createSessionRuntime = ({
   sessionIdleGraceMs = TERMINAL_SESSION_IDLE_GRACE_MS,
   scrollbackMaxBytes = TERMINAL_SCROLLBACK_MAX_BYTES,
   onStateChange,
+  onSessionRegistered,
 }: CreateSessionRuntimeOptions) => {
   const DEFAULT_PTY_COLS = 120;
   const DEFAULT_PTY_ROWS = 35;
@@ -325,6 +330,233 @@ export const createSessionRuntime = ({
     }, sessionIdleGraceMs);
   };
 
+  // Bootstrap phases, for claude-code, in order:
+  //   1. Write the agent bootstrap command (`claude\r`).
+  //   2. Wait until claude's TUI is ready to accept input.
+  //   3. Write `/effort auto\r` to select the model tier.
+  //   4. Wait until claude is ready again.
+  //   5. Bracketed-paste the initial prompt.
+  //   6. Write `\r` to submit.
+  //   7. Confirm the submit landed. Retry from (5) if it was eaten.
+  //
+  // Legacy path (OCTOGENT_HOOK_GATED_BOOTSTRAP=0 or non-claude providers):
+  // steps (2) and (4) are fixed setTimeout delays, and (7) is "best effort
+  // write an Enter and hope". That path is the single biggest source of
+  // the "[Pasted text +N lines]" staged-but-unsubmitted failure mode under
+  // concurrent spawns.
+  //
+  // Hook-gated path (default, claude-code): steps (2), (4), and (7) are
+  // gated on counters bumped by the Claude Code hook callbacks —
+  // notification.idle_prompt for ready, user-prompt-submit for landed.
+  // System load no longer racing against wall-clock timers; instead, each
+  // phase transitions on Claude's own "I'm ready" / "I received your
+  // prompt" signal. The legacy timer values become hard sanity caps only.
+  const HOOK_READY_TIMEOUT_MS = 15_000;
+  const HOOK_EFFORT_IDLE_TIMEOUT_MS = 5_000;
+  const HOOK_SUBMIT_TIMEOUT_MS = 5_000;
+  const PASTE_RENDER_DELAY_MS = 400;
+  const MAX_PASTE_ATTEMPTS = 3;
+  const HOOK_POLL_INTERVAL_MS = 50;
+
+  type CounterKey = "idlePromptCount" | "userPromptSubmitCount";
+  type CounterWatch = { key: CounterKey; baseline: number; label: string };
+
+  const waitForCounterIncrement = async (
+    sessionId: string,
+    session: TerminalSession,
+    watches: CounterWatch[],
+    timeoutMs: number,
+  ): Promise<string> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (sessions.get(sessionId) !== session) {
+        return "aborted";
+      }
+      for (const { key, baseline, label } of watches) {
+        const current = session[key] ?? 0;
+        if (current > baseline) {
+          return label;
+        }
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, HOOK_POLL_INTERVAL_MS));
+    }
+    return "timeout";
+  };
+
+  const runLegacyTimerBootstrap = (
+    sessionId: string,
+    session: TerminalSession,
+    provider: string,
+  ) => {
+    if (provider === "claude-code") {
+      setTimeout(() => {
+        if (sessions.get(sessionId) !== session) {
+          return;
+        }
+        appendDebugLog(session, `effort-auto session=${sessionId} path=legacy`);
+        session.pty.write("/effort auto\r");
+      }, INITIAL_PROMPT_DELAY_MS);
+    }
+
+    const promptInjectionDelayMs =
+      provider === "claude-code"
+        ? INITIAL_PROMPT_DELAY_MS + CLAUDE_SLASH_COMMAND_DELAY_MS
+        : INITIAL_PROMPT_DELAY_MS;
+
+    if (session.initialPrompt && !session.isInitialPromptSent) {
+      setTimeout(() => {
+        if (session.isInitialPromptSent) {
+          return;
+        }
+        session.isInitialPromptSent = true;
+        appendDebugLog(session, `initial-prompt session=${sessionId} path=legacy`);
+        const prompt = session.initialPrompt ?? "";
+        session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
+        setTimeout(() => {
+          if (sessions.get(sessionId) !== session) {
+            return;
+          }
+          appendDebugLog(session, `initial-prompt-submit session=${sessionId} path=legacy`);
+          session.pty.write("\r");
+        }, INITIAL_PROMPT_SUBMIT_DELAY_MS);
+      }, promptInjectionDelayMs);
+    }
+
+    if (session.initialInputDraft && !session.isInitialInputDraftSent && !session.initialPrompt) {
+      setTimeout(() => {
+        if (session.isInitialInputDraftSent) {
+          return;
+        }
+        session.isInitialInputDraftSent = true;
+        appendDebugLog(session, `initial-input-draft session=${sessionId} path=legacy`);
+        const draft = session.initialInputDraft ?? "";
+        session.pty.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
+      }, promptInjectionDelayMs);
+    }
+  };
+
+  const runHookGatedClaudeBootstrap = async (
+    sessionId: string,
+    session: TerminalSession,
+  ): Promise<void> => {
+    // Phase: wait for claude TUI to be ready to accept input.
+    // Baseline is 0, not the current count, because an idle_prompt may
+    // already have been buffered and drained into this session before the
+    // state machine captured a fresh baseline (see drainPendingHookEvents
+    // and onSessionRegistered). Any idle_prompt that ever fired for this
+    // session is a valid "claude booted" signal — we don't need a fresh
+    // one.
+    const readySignal = await waitForCounterIncrement(
+      sessionId,
+      session,
+      [{ key: "idlePromptCount", baseline: 0, label: "idle" }],
+      HOOK_READY_TIMEOUT_MS,
+    );
+    if (readySignal === "aborted") {
+      return;
+    }
+    if (readySignal === "timeout") {
+      appendDebugLog(session, `hook-ready-timeout session=${sessionId} falling back to timer`);
+      // Give claude a minimum boot window before we start injecting.
+      await new Promise<void>((resolve) => setTimeout(resolve, INITIAL_PROMPT_DELAY_MS));
+    }
+
+    // Phase: /effort auto to select model tier.
+    appendDebugLog(session, `effort-auto session=${sessionId} path=hook`);
+    session.pty.write("/effort auto\r");
+    const idleBaseline1 = session.idlePromptCount ?? 0;
+    const effortResult = await waitForCounterIncrement(
+      sessionId,
+      session,
+      [{ key: "idlePromptCount", baseline: idleBaseline1, label: "idle" }],
+      HOOK_EFFORT_IDLE_TIMEOUT_MS,
+    );
+    if (effortResult === "aborted") {
+      return;
+    }
+    if (effortResult === "timeout") {
+      // /effort auto may have succeeded silently on versions that don't
+      // fire idle_prompt for slash commands. Proceed anyway after a
+      // small render buffer.
+      await new Promise<void>((resolve) => setTimeout(resolve, CLAUDE_SLASH_COMMAND_DELAY_MS));
+    }
+
+    // Phase: inject initial prompt with retry on paste-eaten.
+    if (session.initialPrompt && !session.isInitialPromptSent) {
+      session.isInitialPromptSent = true;
+      const prompt = session.initialPrompt;
+
+      let landed = false;
+      for (let attempt = 1; attempt <= MAX_PASTE_ATTEMPTS; attempt++) {
+        const submitBefore = session.userPromptSubmitCount ?? 0;
+        const idleBefore = session.idlePromptCount ?? 0;
+
+        appendDebugLog(
+          session,
+          `initial-prompt session=${sessionId} path=hook attempt=${attempt}`,
+        );
+        session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
+        await new Promise<void>((resolve) => setTimeout(resolve, PASTE_RENDER_DELAY_MS));
+        appendDebugLog(
+          session,
+          `initial-prompt-submit session=${sessionId} path=hook attempt=${attempt}`,
+        );
+        session.pty.write("\r");
+
+        const signal = await waitForCounterIncrement(
+          sessionId,
+          session,
+          [
+            { key: "userPromptSubmitCount", baseline: submitBefore, label: "submit" },
+            { key: "idlePromptCount", baseline: idleBefore, label: "idle" },
+          ],
+          HOOK_SUBMIT_TIMEOUT_MS,
+        );
+
+        if (signal === "aborted") {
+          return;
+        }
+        if (signal === "submit") {
+          appendDebugLog(
+            session,
+            `initial-prompt-confirmed session=${sessionId} attempt=${attempt}`,
+          );
+          landed = true;
+          break;
+        }
+        if (signal === "idle") {
+          // idle_prompt re-fired after our paste+\r = our input was eaten.
+          // Retry the whole paste sequence on the next loop iteration.
+          appendDebugLog(
+            session,
+            `initial-prompt-eaten-retry session=${sessionId} attempt=${attempt}`,
+          );
+          continue;
+        }
+        appendDebugLog(
+          session,
+          `initial-prompt-signal-timeout session=${sessionId} attempt=${attempt}`,
+        );
+      }
+
+      if (!landed) {
+        appendDebugLog(
+          session,
+          `initial-prompt-gave-up session=${sessionId} attempts=${MAX_PASTE_ATTEMPTS}`,
+        );
+      }
+    }
+
+    // Phase: inject input draft (no submit) if applicable.
+    if (session.initialInputDraft && !session.isInitialInputDraftSent && !session.initialPrompt) {
+      session.isInitialInputDraftSent = true;
+      appendDebugLog(session, `initial-input-draft session=${sessionId} path=hook`);
+      session.pty.write(
+        `${BRACKETED_PASTE_START}${session.initialInputDraft}${BRACKETED_PASTE_END}`,
+      );
+    }
+  };
+
   const ensureAgentBootstrapped = (sessionId: string, session: TerminalSession) => {
     if (session.isBootstrapCommandSent) {
       return;
@@ -339,57 +571,17 @@ export const createSessionRuntime = ({
     appendDebugLog(session, `bootstrap session=${sessionId} command=${bootstrapCommand}`);
     session.pty.write(`${bootstrapCommand}\r`);
 
-    // For claude-code terminals, enable automatic model selection (/effort auto)
-    // once the agent has booted. Runs before any initial prompt injection so the
-    // effort setting is in place before the real first message arrives.
-    if (provider === "claude-code") {
-      setTimeout(() => {
-        if (sessions.get(sessionId) !== session) {
-          return;
-        }
-        appendDebugLog(session, `effort-auto session=${sessionId}`);
-        session.pty.write("/effort auto\r");
-      }, INITIAL_PROMPT_DELAY_MS);
+    // Feature flag: `OCTOGENT_HOOK_GATED_BOOTSTRAP=0` forces the old timer
+    // behavior without a rebuild, giving the operator a kill switch if
+    // the signal-gated path misbehaves on their claude-code version.
+    const hookGatingDisabled = process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP === "0";
+
+    if (provider === "claude-code" && !hookGatingDisabled) {
+      void runHookGatedClaudeBootstrap(sessionId, session);
+      return;
     }
 
-    // Delay the initial prompt injection for claude-code so /effort auto has
-    // time to process before the bracketed paste arrives.
-    const promptInjectionDelayMs =
-      provider === "claude-code"
-        ? INITIAL_PROMPT_DELAY_MS + CLAUDE_SLASH_COMMAND_DELAY_MS
-        : INITIAL_PROMPT_DELAY_MS;
-
-    // Schedule initial prompt injection after Claude Code has had time to boot.
-    if (session.initialPrompt && !session.isInitialPromptSent) {
-      setTimeout(() => {
-        if (session.isInitialPromptSent) {
-          return;
-        }
-        session.isInitialPromptSent = true;
-        appendDebugLog(session, `initial-prompt session=${sessionId}`);
-        const prompt = session.initialPrompt ?? "";
-        session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
-        setTimeout(() => {
-          if (sessions.get(sessionId) !== session) {
-            return;
-          }
-          appendDebugLog(session, `initial-prompt-submit session=${sessionId}`);
-          session.pty.write("\r");
-        }, INITIAL_PROMPT_SUBMIT_DELAY_MS);
-      }, promptInjectionDelayMs);
-    }
-
-    if (session.initialInputDraft && !session.isInitialInputDraftSent && !session.initialPrompt) {
-      setTimeout(() => {
-        if (session.isInitialInputDraftSent) {
-          return;
-        }
-        session.isInitialInputDraftSent = true;
-        appendDebugLog(session, `initial-input-draft session=${sessionId}`);
-        const draft = session.initialInputDraft ?? "";
-        session.pty.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
-      }, promptInjectionDelayMs);
-    }
+    runLegacyTimerBootstrap(sessionId, session, provider);
   };
 
   const ensureSession = (sessionId: string, tentacleId: string) => {
@@ -521,6 +713,11 @@ export const createSessionRuntime = ({
     }
 
     sessions.set(sessionId, session);
+    // Drain any hook events that arrived between installHooksInDirectory
+    // (done during createTerminal, before this PTY was spawned) and now.
+    // Tiny race window in normal conditions, but under 5+ concurrent
+    // spawns the curl callback can beat us to the map.
+    onSessionRegistered?.(sessionId);
     return session;
   };
 

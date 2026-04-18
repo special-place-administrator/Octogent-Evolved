@@ -75,6 +75,22 @@ export type TerminalSession = {
   keepAliveWithoutClients?: boolean;
   hasSeenProcessing?: boolean;
   lastToolName?: string | undefined;
+  // Counters driven by Claude Code hook callbacks. They let the bootstrap
+  // state machine gate on "claude said it's idle" / "claude received a
+  // prompt submit" instead of fixed-duration timers.
+  //
+  // - `idlePromptCount` is bumped every time a `notification` hook fires
+  //   with `notification_type === "idle_prompt"` (TUI sitting at input).
+  // - `userPromptSubmitCount` is bumped every time `user-prompt-submit`
+  //   fires (claude accepted a prompt and began processing).
+  // - `sessionStartAt` is the timestamp of the first `session-start` hook
+  //   for this session, if one was received.
+  //
+  // These are pure monotonic counters; the bootstrap routine captures a
+  // baseline and polls for "count > baseline" to detect a new signal.
+  idlePromptCount?: number;
+  userPromptSubmitCount?: number;
+  sessionStartAt?: number;
 };
 
 export type TerminalNameOrigin = "generated" | "user" | "prompt";

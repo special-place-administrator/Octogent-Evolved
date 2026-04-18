@@ -114,6 +114,12 @@ export const createTerminalRuntime = ({
     });
   };
 
+  // Late-bound drain callback: hookProcessor is created after sessionRuntime
+  // (it depends on channelMessaging which depends on sessionRuntime.writeInput),
+  // but sessionRuntime needs to call drainPendingHookEvents the moment a new
+  // session registers. We thread it through as a mutable ref.
+  let drainPendingHookEventsRef: ((sessionId: string) => void) | undefined;
+
   const sessionRuntime = createSessionRuntime({
     websocketServer,
     terminals,
@@ -125,6 +131,7 @@ export const createTerminalRuntime = ({
     ptyLogDir,
     transcriptDirectoryPath,
     onStateChange: broadcastTerminalStateChanged,
+    onSessionRegistered: (sessionId: string) => drainPendingHookEventsRef?.(sessionId),
   });
 
   const gitOps = createGitOperations({
@@ -148,6 +155,7 @@ export const createTerminalRuntime = ({
     deliverChannelMessages: channelMessaging.deliverChannelMessages,
     onStateChange: broadcastTerminalStateChanged,
   });
+  drainPendingHookEventsRef = hookProcessor.drainPendingHookEvents;
 
   const allocateTerminalId = () => {
     let candidateNumber = 1;
