@@ -107,12 +107,16 @@ export const createWorktreeManager = ({
           path: worktreePath,
         });
       } catch (error) {
-        if (bestEffort) {
-          return;
+        if (!bestEffort) {
+          throw new RuntimeInputError(
+            `Unable to remove worktree for ${tentacleId}: ${toErrorMessage(error)}`,
+          );
         }
-        throw new RuntimeInputError(
-          `Unable to remove worktree for ${tentacleId}: ${toErrorMessage(error)}`,
-        );
+        // bestEffort: swallow and still attempt branch cleanup below. The
+        // previous implementation short-circuited here, which was enough
+        // to leave the ghost feeling "deleted" in the UI but actually left
+        // an orphan branch behind in git. Continuing to branch removal
+        // maximizes cleanup in the hands-off delete case.
       }
     }
 
@@ -122,12 +126,14 @@ export const createWorktreeManager = ({
         branchName,
       });
     } catch (error) {
-      if (bestEffort) {
-        return;
+      if (!bestEffort) {
+        throw new RuntimeInputError(
+          `Unable to remove branch for ${tentacleId}: ${toErrorMessage(error)}`,
+        );
       }
-      throw new RuntimeInputError(
-        `Unable to remove branch for ${tentacleId}: ${toErrorMessage(error)}`,
-      );
+      // bestEffort: swallow. Orphan branch is benign; `git branch --merged`
+      // or a later prune picks it up. User-driven UI deletes prefer the
+      // ghost disappearing over throwing on a git hiccup.
     }
   };
 

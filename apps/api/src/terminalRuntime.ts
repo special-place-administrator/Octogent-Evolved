@@ -514,12 +514,22 @@ export const createTerminalRuntime = ({
           // the tentacle, not the terminal. Preserve them across terminal
           // lifecycles so sequential workers on the same tentacle can resume
           // on the previous worker's branch. Free-standing worktrees
-          // (worktreeId !== tentacleId, e.g. octoboss ad-hoc terminals) are
-          // one-per-terminal and remain auto-cleaned.
+          // (worktreeId !== tentacleId, e.g. octoboss ad-hoc terminals and
+          // swarm workers) are one-per-terminal and remain auto-cleaned.
           const isTentacleScopedWorktree =
             effectiveWorktreeId === cascadeTerminal.tentacleId;
           if (!isTentacleScopedWorktree) {
-            worktreeManager.removeTentacleWorktree(effectiveWorktreeId);
+            // bestEffort: if git refuses to remove the worktree (modified
+            // files, prior crash left metadata stale, branch already
+            // deleted, etc.), the user's delete must still succeed — the
+            // terminal record gets dropped and the UI ghost disappears.
+            // Without this, a dirty worktree or a raced git state can
+            // leave a node the user can never dismiss from the canvas
+            // except by hand-editing the registry. Manual `git worktree
+            // prune` can reclaim the orphan later if one remains.
+            worktreeManager.removeTentacleWorktree(effectiveWorktreeId, {
+              bestEffort: true,
+            });
           }
         }
         terminals.delete(cascadeTerminalId);
