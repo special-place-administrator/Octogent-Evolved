@@ -300,6 +300,25 @@ export const OctopusNode = ({
         );
       })()}
 
+      {/* Todo progress fraction — shown on incomplete tentacles */}
+      {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone !== node.todoTotal && (
+        <text
+          x={glyphW / 2 - glyphW * 0.05}
+          y={glyphH * 0.1}
+          textAnchor="start"
+          dominantBaseline="central"
+          fontSize={glyphW * 0.18}
+          fontWeight="bold"
+          stroke="black"
+          strokeWidth={glyphW * 0.04}
+          strokeLinejoin="round"
+          paintOrder="stroke"
+          fill="white"
+        >
+          {node.todoDone}/{node.todoTotal}
+        </text>
+      )}
+
       {/* Label — always visible, up to two lines */}
       <text
         y={glyphH / 2 - 12}
