@@ -149,7 +149,7 @@ export const handleHookRoute: ApiRouteHandler = async (
 
   if (hookName === "session-start" || hookName === "stop") {
     invalidateClaudeUsageCache();
-    void readClaudeUsageSnapshot();
+    void readClaudeUsageSnapshot().catch(() => {});
   }
 
   writeJson(response, 200, result, corsOrigin);

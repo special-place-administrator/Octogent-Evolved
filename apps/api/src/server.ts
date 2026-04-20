@@ -62,11 +62,17 @@ const shutdown = async () => {
 };
 
 process.on("SIGINT", () => {
-  void shutdown();
+  shutdown().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 });
 
 process.on("SIGTERM", () => {
-  void shutdown();
+  shutdown().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 });
 
 apiServer

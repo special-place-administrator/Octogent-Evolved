@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { logVerbose } from "../logging";
@@ -62,10 +69,7 @@ export const createHookProcessor = (deps: {
   // hook we emit; a user's own hook that happens to mention those paths
   // is extraordinarily unlikely, and even then the cost is that the
   // user's hook gets replaced on next install — a merge, not a data loss.
-  const OCTOGENT_HOOK_FINGERPRINTS = [
-    "/api/hooks/",
-    "/api/code-intel/events",
-  ];
+  const OCTOGENT_HOOK_FINGERPRINTS = ["/api/hooks/", "/api/code-intel/events"];
 
   const isOctogentOwnedHookEntry = (entry: unknown): boolean => {
     const serialized = JSON.stringify(entry);
@@ -422,8 +426,7 @@ export const createHookProcessor = (deps: {
         // confirm "claude actually received our injected prompt" — the
         // unambiguous success signal that our bracketed-paste + Enter
         // landed, not a staged-but-unsubmitted buffer.
-        activitySession.userPromptSubmitCount =
-          (activitySession.userPromptSubmitCount ?? 0) + 1;
+        activitySession.userPromptSubmitCount = (activitySession.userPromptSubmitCount ?? 0) + 1;
       }
 
       // Auto-name the terminal from the first prompt when it still has its default name.

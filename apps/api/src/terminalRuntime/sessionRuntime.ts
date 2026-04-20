@@ -589,7 +589,9 @@ export const createSessionRuntime = ({
     const hookGatingDisabled = process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP === "0";
 
     if (provider === "claude-code" && !hookGatingDisabled) {
-      void runHookGatedClaudeBootstrap(sessionId, session);
+      void runHookGatedClaudeBootstrap(sessionId, session).catch((err) => {
+        appendDebugLog(session, `bootstrap-error session=${sessionId} ${toErrorMessage(err)}`);
+      });
       return;
     }
 
@@ -749,10 +751,10 @@ export const createSessionRuntime = ({
       let session: TerminalSession;
       try {
         session = ensureSession(sessionId, tentacleId);
-      } catch (error) {
+      } catch {
         sendMessage(websocket, {
           type: "output",
-          data: `\r\n[terminal failed to start: ${toErrorMessage(error)}]\r\n`,
+          data: "\r\n[terminal failed to start]\r\n",
         });
         websocket.close();
         return;

@@ -242,8 +242,18 @@ const startServer = async () => {
     process.exit(0);
   };
 
-  process.on("SIGINT", () => void shutdown());
-  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () =>
+    shutdown().catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );
+  process.on("SIGTERM", () =>
+    shutdown().catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );
 
   const { host, port: activePort } = await apiServer.start(port, "127.0.0.1");
   const apiBaseUrl = `http://${host}:${activePort}`;

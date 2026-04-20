@@ -21,5 +21,9 @@ export const readJsonBody = async (request: IncomingMessage): Promise<unknown> =
     return null;
   }
 
-  return JSON.parse(payload);
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new RequestBodyTooLargeError("Invalid JSON.");
+  }
 };

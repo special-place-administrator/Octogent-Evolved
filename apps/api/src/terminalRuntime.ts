@@ -118,7 +118,9 @@ export const createTerminalRuntime = ({
   // (it depends on channelMessaging which depends on sessionRuntime.writeInput),
   // but sessionRuntime needs to call drainPendingHookEvents the moment a new
   // session registers. We thread it through as a mutable ref.
-  let drainPendingHookEventsRef: ((sessionId: string) => void) | undefined;
+  const drainPendingHookEventsRef: { current: ((sessionId: string) => void) | undefined } = {
+    current: undefined,
+  };
 
   const sessionRuntime = createSessionRuntime({
     websocketServer,
@@ -131,7 +133,7 @@ export const createTerminalRuntime = ({
     ptyLogDir,
     transcriptDirectoryPath,
     onStateChange: broadcastTerminalStateChanged,
-    onSessionRegistered: (sessionId: string) => drainPendingHookEventsRef?.(sessionId),
+    onSessionRegistered: (sessionId: string) => drainPendingHookEventsRef.current?.(sessionId),
   });
 
   const gitOps = createGitOperations({
@@ -155,7 +157,7 @@ export const createTerminalRuntime = ({
     deliverChannelMessages: channelMessaging.deliverChannelMessages,
     onStateChange: broadcastTerminalStateChanged,
   });
-  drainPendingHookEventsRef = hookProcessor.drainPendingHookEvents;
+  drainPendingHookEventsRef.current = hookProcessor.drainPendingHookEvents;
 
   // Refresh hook URLs in every existing claude-code worktree's
   // .claude/settings.json. Hook commands bake the API base URL at install
@@ -532,16 +534,14 @@ export const createTerminalRuntime = ({
 
         sessionRuntime.closeSession(cascadeTerminalId);
         if (cascadeTerminal.workspaceMode === "worktree") {
-          const effectiveWorktreeId =
-            cascadeTerminal.worktreeId ?? cascadeTerminal.tentacleId;
+          const effectiveWorktreeId = cascadeTerminal.worktreeId ?? cascadeTerminal.tentacleId;
           // Tentacle-scoped worktrees (worktreeId === tentacleId) belong to
           // the tentacle, not the terminal. Preserve them across terminal
           // lifecycles so sequential workers on the same tentacle can resume
           // on the previous worker's branch. Free-standing worktrees
           // (worktreeId !== tentacleId, e.g. octoboss ad-hoc terminals and
           // swarm workers) are one-per-terminal and remain auto-cleaned.
-          const isTentacleScopedWorktree =
-            effectiveWorktreeId === cascadeTerminal.tentacleId;
+          const isTentacleScopedWorktree = effectiveWorktreeId === cascadeTerminal.tentacleId;
           if (!isTentacleScopedWorktree) {
             // bestEffort: if git refuses to remove the worktree (modified
             // files, prior crash left metadata stale, branch already
