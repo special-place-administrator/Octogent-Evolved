@@ -286,21 +286,25 @@ export const OctopusNode = ({
         </div>
       </foreignObject>
 
-      {/* All-done checkmark — shown when all todos are completed */}
-      {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone === node.todoTotal && (
-        <g transform={`translate(${glyphW / 2 - glyphW / 6}, ${glyphH / 2 - glyphH / 6})`}>
-          <circle r={glyphW / 6} fill="#22c55e" opacity={0.92} />
-          <text
-            textAnchor="middle"
-            dominantBaseline="central"
-            fontSize={glyphW / 5}
-            fill="white"
-            fontWeight="bold"
-          >
-            ✓
-          </text>
-        </g>
-      )}
+      {/* All-done checkmark — top-right corner over the glyph */}
+      {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone === node.todoTotal && (() => {
+        const s = glyphW / 3;
+        const cx = glyphW / 2 - s * 0.1;
+        const cy = -glyphH / 2 + s * 0.1;
+        const t = s * 0.28;
+        return (
+          <g transform={`translate(${cx}, ${cy})`}>
+            <polyline
+              points={`${-t * 1.1},0 ${-t * 0.2},${t * 0.9} ${t * 1.1},${-t * 0.9}`}
+              fill="none"
+              stroke="#22c55e"
+              strokeWidth={t * 0.7}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+        );
+      })()}
 
       {/* Label — always visible, up to two lines */}
       <text
