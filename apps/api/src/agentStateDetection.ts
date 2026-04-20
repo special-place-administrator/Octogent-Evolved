@@ -2,7 +2,6 @@ import type { AgentRuntimeState } from "@octogent/core";
 
 export type { AgentRuntimeState };
 
-const PROCESSING_PATTERN = /esc to interrupt/i;
 const WAITING_FOR_PERMISSION_PATTERNS = [
   /permission[^\n]{0,40}(required|needed|request)/i,
   /approval[^\n]{0,40}(required|needed|request)/i,
@@ -101,9 +100,6 @@ const findLastRelevantMatchIndex = (text: string, pattern: RegExp, chunkStartInd
   return latest;
 };
 
-const hasProcessingSignal = (text: string, chunkStartIndex: number): boolean =>
-  findLastRelevantMatchIndex(text, PROCESSING_PATTERN, chunkStartIndex) !== -1;
-
 const hasPatternSignal = (
   text: string,
   chunkStartIndex: number,
@@ -200,11 +196,7 @@ export class AgentStateTracker {
       return this.enterWaiting("waiting_for_user");
     }
 
-    if (hasProcessingSignal(combined, chunkStartIndex)) {
-      return this.enterProcessing(now);
-    }
-
-    return null;
+    return this.enterProcessing(now);
   }
 
   poll(now = Date.now()): AgentRuntimeState | null {
