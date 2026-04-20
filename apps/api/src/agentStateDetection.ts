@@ -3,6 +3,21 @@ import type { AgentRuntimeState } from "@octogent/core";
 export type { AgentRuntimeState };
 
 const PROCESSING_PATTERN = /esc to interrupt/i;
+const WAITING_FOR_PERMISSION_PATTERNS = [
+  /permission[^\n]{0,40}(required|needed|request)/i,
+  /approval[^\n]{0,40}(required|needed|request)/i,
+  /(allow|approve)[^\n]{0,24}(once|always)/i,
+] as const;
+const WAITING_FOR_USER_PATTERNS = [
+  /waiting for (your|user) input/i,
+  /please choose/i,
+  /press enter to continue/i,
+  /ask user question/i,
+  /do you want me to/i,
+  /would you like me to/i,
+  /please confirm/i,
+  /shall i/i,
+] as const;
 
 const DEFAULT_MAX_BUFFER_LENGTH = 256;
 const DEFAULT_IDLE_AFTER_MS = 1_600;
@@ -89,6 +104,13 @@ const findLastRelevantMatchIndex = (text: string, pattern: RegExp, chunkStartInd
 const hasProcessingSignal = (text: string, chunkStartIndex: number): boolean =>
   findLastRelevantMatchIndex(text, PROCESSING_PATTERN, chunkStartIndex) !== -1;
 
+const hasPatternSignal = (
+  text: string,
+  chunkStartIndex: number,
+  patterns: readonly RegExp[],
+): boolean =>
+  patterns.some((pattern) => findLastRelevantMatchIndex(text, pattern, chunkStartIndex) !== -1);
+
 export class AgentStateTracker {
   private readonly maxBufferLength: number;
   private readonly idleAfterMs: number;
@@ -121,6 +143,18 @@ export class AgentStateTracker {
 
     this.state = "processing";
     return "processing";
+  }
+
+  private enterWaiting(
+    nextState: Extract<AgentRuntimeState, "waiting_for_permission" | "waiting_for_user">,
+  ): AgentRuntimeState | null {
+    this.idleDeadlineAt = null;
+    if (this.state === nextState) {
+      return null;
+    }
+
+    this.state = nextState;
+    return nextState;
   }
 
   forceState(nextState: AgentRuntimeState, now = Date.now()): boolean {
@@ -158,11 +192,19 @@ export class AgentStateTracker {
       this.idleDeadlineAt = now + this.idleAfterMs;
     }
 
-    if (!hasProcessingSignal(combined, chunkStartIndex)) {
-      return null;
+    if (hasPatternSignal(combined, chunkStartIndex, WAITING_FOR_PERMISSION_PATTERNS)) {
+      return this.enterWaiting("waiting_for_permission");
     }
 
-    return this.enterProcessing(now);
+    if (hasPatternSignal(combined, chunkStartIndex, WAITING_FOR_USER_PATTERNS)) {
+      return this.enterWaiting("waiting_for_user");
+    }
+
+    if (hasProcessingSignal(combined, chunkStartIndex)) {
+      return this.enterProcessing(now);
+    }
+
+    return null;
   }
 
   poll(now = Date.now()): AgentRuntimeState | null {

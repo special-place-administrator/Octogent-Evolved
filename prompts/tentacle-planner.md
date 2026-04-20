@@ -163,7 +163,21 @@ Run from the project root:
 "manual — maintenance pass", "external scheduler (Task Scheduler)">.
 ```
 
-3. Write `.octogent/tentacles/<id>/todo.md`. Rules:
+3. Check for Claude Code skills in `.claude/skills/`. Each skill lives in its own folder with a `SKILL.md` file. If you find skills relevant to this tentacle's scope, append this block at the bottom of `CONTEXT.md`:
+
+   ```markdown
+   <!-- octogent:suggested-skills:start -->
+   ## Suggested Skills
+
+   You can use these skills if you need to.
+
+   - `skill-name`
+   <!-- octogent:suggested-skills:end -->
+   ```
+
+   Only include skills genuinely useful for this tentacle. Replace `skill-name` with the actual discovered skill names.
+
+5. Write `.octogent/tentacles/<id>/todo.md`. Rules:
    - Each item is an **epic** — one focused session's worth of work (15–60 min of agent time).
    - Items within a tentacle must **not overlap files**. If two items would edit the same file, merge them into one item.
    - Items must be grounded in **observed reality** — missing tests you saw, TODOs you read, stale docs you identified. Not generic best-practices.

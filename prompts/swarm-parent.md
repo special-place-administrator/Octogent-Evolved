@@ -117,6 +117,7 @@ Watch for these in your own behavior:
 3. **Blind merging.** Always run `git log --oneline`, `git show --stat`, and `git diff <base>..<branch>` before `git merge`. Commit messages can be misleading; diffs cannot.
 4. **Trying to spawn workers.** Workers already exist. If one never commits, investigate — don't spawn a replacement.
 5. **Merging without post-merge verification.** Individual worker branches may pass verification in isolation but conflict on integration. Always run verification on the integration branch before merging to base.
+6. **Forgetting to tick the todo checkbox.** After merging a worker branch, tick the corresponding `- [ ]` → `- [x]` in `.octogent/tentacles/{{tentacleId}}/todo.md` on the main branch and commit it. The UI reads `todo.md` from main — workers cannot tick it from their worktrees without causing merge conflicts.
 
 Your terminal ID is `{{terminalId}}`. The API is at `http://localhost:{{apiPort}}`.
 
