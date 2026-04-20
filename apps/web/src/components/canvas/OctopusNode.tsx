@@ -300,12 +300,12 @@ export const OctopusNode = ({
         );
       })()}
 
-      {/* Todo progress fraction — shown on incomplete tentacles */}
+      {/* Todo progress fraction — shown on incomplete tentacles, same position as checkmark */}
       {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone !== node.todoTotal && (
         <text
-          x={glyphW / 2 - glyphW * 0.05}
+          x={glyphW / 2 - glyphW * 0.18}
           y={glyphH * 0.1}
-          textAnchor="start"
+          textAnchor="middle"
           dominantBaseline="central"
           fontSize={glyphW * 0.18}
           fontWeight="bold"
