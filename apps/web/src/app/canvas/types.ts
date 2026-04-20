@@ -26,6 +26,8 @@ export type GraphNode = {
   parentTerminalId?: string;
   firstPromptPreview?: string;
   octopus?: DeckOctopusAppearance;
+  todoTotal?: number;
+  todoDone?: number;
 };
 
 export type GraphEdge = {

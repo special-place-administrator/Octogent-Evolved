@@ -286,6 +286,22 @@ export const OctopusNode = ({
         </div>
       </foreignObject>
 
+      {/* All-done checkmark — shown when all todos are completed */}
+      {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone === node.todoTotal && (
+        <g transform={`translate(${glyphW / 2 - glyphW / 6}, ${glyphH / 2 - glyphH / 6})`}>
+          <circle r={glyphW / 6} fill="#22c55e" opacity={0.92} />
+          <text
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={glyphW / 5}
+            fill="white"
+            fontWeight="bold"
+          >
+            ✓
+          </text>
+        </g>
+      )}
+
       {/* Label — always visible, up to two lines */}
       <text
         y={glyphH / 2 - 12}
