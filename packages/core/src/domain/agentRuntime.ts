@@ -1,3 +1,10 @@
+/**
+ * Fine-grained runtime state reported by the agent process itself.
+ * - `idle` — agent loop is running but has no active work
+ * - `processing` — agent is actively computing a response or running tools
+ * - `waiting_for_permission` — agent paused; a tool call requires user approval
+ * - `waiting_for_user` — agent emitted a question and is waiting for human input
+ */
 export type AgentRuntimeState =
   | "idle"
   | "processing"
