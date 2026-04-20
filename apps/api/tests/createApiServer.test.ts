@@ -3204,4 +3204,306 @@ describe("createApiServer", () => {
       ]),
     );
   });
+
+  // ── Request parser tests for todo routes ─────────────────────────────────
+
+  it("todo-add: rejects missing or blank text", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Existing item\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const missingText = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(missingText.status).toBe(400);
+    await expect(missingText.json()).resolves.toEqual({ error: "text (non-empty string) is required" });
+
+    const blankText = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "   " }),
+    });
+    expect(blankText.status).toBe(400);
+    await expect(blankText.json()).resolves.toEqual({ error: "text (non-empty string) is required" });
+  });
+
+  it("todo-add: returns 404 when tentacle todo.md does not exist", async () => {
+    const baseUrl = await startServer();
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/nonexistent/todo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "New item" }),
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Tentacle todo.md not found" });
+  });
+
+  it("todo-add: appends a new item and returns updated progress", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [x] Done item\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "  New task  " }),
+    });
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({
+      total: 2,
+      done: 1,
+      items: [
+        { text: "Done item", done: true },
+        { text: "New task", done: false },
+      ],
+    });
+  });
+
+  it("todo-edit: rejects missing itemIndex or blank text", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+    const url = `${baseUrl}/api/deck/tentacles/my-tentacle/todo/edit`;
+
+    const noIndex = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Updated" }),
+    });
+    expect(noIndex.status).toBe(400);
+    await expect(noIndex.json()).resolves.toEqual({
+      error: "itemIndex (number) and text (non-empty string) are required",
+    });
+
+    const blankText = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 0, text: "  " }),
+    });
+    expect(blankText.status).toBe(400);
+    await expect(blankText.json()).resolves.toEqual({
+      error: "itemIndex (number) and text (non-empty string) are required",
+    });
+  });
+
+  it("todo-edit: returns 404 for out-of-range itemIndex", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/edit`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 99, text: "Updated" }),
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Todo item not found" });
+  });
+
+  it("todo-edit: updates the item text and returns updated progress", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n- [x] Item B\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/edit`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 0, text: "  Renamed A  " }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      total: 2,
+      done: 1,
+      items: [
+        { text: "Renamed A", done: false },
+        { text: "Item B", done: true },
+      ],
+    });
+  });
+
+  it("todo-delete: rejects missing or non-number itemIndex", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+    const url = `${baseUrl}/api/deck/tentacles/my-tentacle/todo/delete`;
+
+    const noIndex = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(noIndex.status).toBe(400);
+    await expect(noIndex.json()).resolves.toEqual({ error: "itemIndex (number) is required" });
+
+    const stringIndex = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: "0" }),
+    });
+    expect(stringIndex.status).toBe(400);
+    await expect(stringIndex.json()).resolves.toEqual({ error: "itemIndex (number) is required" });
+  });
+
+  it("todo-delete: returns 404 for out-of-range itemIndex", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 99 }),
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Todo item not found" });
+  });
+
+  it("todo-delete: removes the item and returns updated progress", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n- [x] Item B\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 0 }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      total: 1,
+      done: 1,
+      items: [{ text: "Item B", done: true }],
+    });
+  });
+
+  it("todo-toggle: rejects missing itemIndex or non-boolean done", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+    const url = `${baseUrl}/api/deck/tentacles/my-tentacle/todo/toggle`;
+
+    const noDone = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 0 }),
+    });
+    expect(noDone.status).toBe(400);
+    await expect(noDone.json()).resolves.toEqual({
+      error: "itemIndex (number) and done (boolean) are required",
+    });
+
+    const noIndex = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ done: true }),
+    });
+    expect(noIndex.status).toBe(400);
+    await expect(noIndex.json()).resolves.toEqual({
+      error: "itemIndex (number) and done (boolean) are required",
+    });
+  });
+
+  it("todo-toggle: returns 404 for out-of-range itemIndex", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/toggle`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 99, done: true }),
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Todo item not found" });
+  });
+
+  it("todo-toggle: marks item done and returns updated progress", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "my-tentacle"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "my-tentacle", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n- [ ] Item B\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo/toggle`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIndex: 1, done: true }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      total: 2,
+      done: 1,
+      items: [
+        { text: "Item A", done: false },
+        { text: "Item B", done: true },
+      ],
+    });
+  });
 });
