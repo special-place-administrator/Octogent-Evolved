@@ -3001,6 +3001,201 @@ describe("createApiServer", () => {
     ]);
   });
 
+  it("returns 405 for non-POST requests to the swarm route", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+
+    expect(response.status).toBe(405);
+  });
+
+  it("returns 404 when the tentacle directory does not exist for swarm", async () => {
+    const baseUrl = await startServer();
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/nonexistent-tentacle/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Tentacle or todo.md not found.",
+    });
+  });
+
+  it("returns 404 when todo.md is missing for swarm", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    // Tentacle dir exists but no todo.md
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Tentacle or todo.md not found.",
+    });
+  });
+
+  it("returns 400 when all todo items are already done for swarm", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [x] Already done\n- [x] Also done\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "No incomplete todo items found.",
+    });
+  });
+
+  it("returns 400 when requested todoItemIndices are all claimed or nonexistent", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n- [ ] Item B\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    // Request index 99 which does not exist in the todo list
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ todoItemIndices: [99] }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "None of the requested todo item indices are free (either done, nonexistent, or already claimed by an active worker).",
+    });
+  });
+
+  it("returns 400 when all incomplete items are already claimed by active workers", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    // Spawn a worker terminal that claims index 0
+    const claimResponse = await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ terminalId: "docs-knowledge-swarm-0", tentacleId: "docs-knowledge" }),
+    });
+    expect(claimResponse.status).toBe(201);
+
+    // Now swarm should see index 0 claimed and have no free items
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "No free todo items available — all incomplete items are already claimed by active workers.",
+      claimedIndices: [0],
+    });
+  });
+
+  it("returns 400 when agentProvider is invalid for swarm", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ agentProvider: "invalid-provider" }),
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 400 when workspaceMode is invalid for swarm", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "tentacles", "docs-knowledge", "todo.md"),
+      "# Todo\n\n- [ ] Item A\n",
+      "utf8",
+    );
+
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const response = await fetch(`${baseUrl}/api/deck/tentacles/docs-knowledge/swarm`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceMode: "invalid-mode" }),
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it("limits swarm prompts to the top-priority items that fit under the child cap", async () => {
     const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
     temporaryDirectories.push(workspaceCwd);
