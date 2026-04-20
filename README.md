@@ -16,7 +16,7 @@
 
 # Octogent-Evolved
 
-> **Fork of [hesamsheikh/octogent](https://github.com/hesamsheikh/octogent)** by **Hesam Sheikh** — original design, canvas UI, tentacle/worktree model, and channel-messaging primitive. This fork hardens the swarm-orchestration flow for real multi-worker workloads. See [`NOTICE.md`](./NOTICE.md) for attribution in full.
+> **Fork of [hesamsheikh/octogent](https://github.com/hesamsheikh/octogent)** by **Hesam Sheikh** — original design, canvas UI, tentacle/worktree model, and channel-messaging primitive. This fork hardens the swarm-orchestration flow for real multi-worker workloads and adds canvas task visibility, security hardening, and coordinator self-cleanup. See [`NOTICE.md`](./NOTICE.md) for attribution in full.
 
 It's really not fun to have **ten Claude Code sessions open at once**, constantly switching between them and trying to remember what each one was supposed to do. *Things get blurry fast* when one agent is doing documentation, another is touching the database, another is changing the API, and another is somewhere in the frontend. **Octogent** gives each job its own <u>scoped context, notes, and task list</u>, while also making it possible for Claude Code to **spawn other Claude Code agents**, assign them work, and communicate with them.
 
@@ -32,6 +32,8 @@ Treat terminal coding agents as parts of a bigger orchestration layer — not th
 - **Spawns child agents from todo items** so parallel work has a concrete source of truth
 - **Supports inter-agent messaging** so workers and coordinators can report completion, blockers, and handoff notes
 - **Keeps agent-facing context in files** so the system is more durable than a single prompt thread
+- **Shows live todo progress on the canvas** — color-coded fractions and checkmarks directly on each octopus node
+- **Auto-cleans swarm sessions** — coordinator deletes all worker terminals then itself after all merges land
 - **Provides a local API and UI** for terminal lifecycle, persistence, websocket transport, and orchestration
 
 A **tentacle** is a folder under `.octogent/tentacles/<tentacle-id>/` that holds agent-readable markdown such as `CONTEXT.md`, `todo.md`, and any extra notes needed for that slice of the codebase. The octopus metaphor is literal: *one octopus, many tentacles, different work happening at the same time*.
@@ -78,6 +80,65 @@ This fork began on `fix/swarm-orchestration` with the goal of making the swarm f
 | `a8cc2cd` | Runtime | Every spawned PTY now inherits identity env vars: `OCTOGENT_TERMINAL_ID`, `OCTOGENT_TENTACLE_ID`, `OCTOGENT_PARENT_TERMINAL_ID`, `OCTOGENT_ROLE`, `OCTOGENT_API_BASE`. Prompts and user commands never hardcode IDs. |
 | `ee3de78` | CLI | `resolveRuntimeApiBase` walks **up** from `cwd` looking for the owning project's config. Fixes `octogent` commands (including `channel send`) from inside a git worktree — previously fell back to the default port and hit either nothing or a stale server. |
 | `82d92be` | Channel delivery | Channel messages sent to claude-code terminals now use bracketed-paste + a deliberate `\r` 2 seconds later (same idiom as initial-prompt injection). Stops messages from staging unsubmitted in the input buffer. |
+
+### Canvas task visibility
+
+| Commit | Area | Summary |
+|---|---|---|
+| `c2aee3d` | Canvas | Green checkmark renders on tentacle nodes where `todoDone === todoTotal > 0`. Double-polyline (black outline + green fill) gives a floating effect visible against any background. |
+| `822c70b`–`45e3044` | Canvas | Iterative positioning: checkmark settled at top-right of the octopus sprite body (`cx = glyphW/2 - glyphW*0.18`, `cy = glyphH*0.1`). |
+| `1a9045a` | Canvas | Color-coded todo fraction appears on incomplete tentacles at the same position as the checkmark. Format: `done/total`. |
+| `85a0d51` | Canvas | Fraction anchored inside sprite bounds (`textAnchor="middle"` at the same x as the checkmark). |
+| `de0e274` | Canvas | Fraction color-coded by progress state: **white** = not started (0 done), **orange** = in progress (some done). Checkmark stays green for fully complete. |
+| `7e38c75` | Deck | Deck view polls tentacle data every 10 s so todo counts stay fresh without a manual refresh. |
+
+### Coordinator nudge & cleanup
+
+| Commit | Area | Summary |
+|---|---|---|
+| Prompt edit | Coordinator prompt | Added **failure mode #6**: after merging a worker branch, coordinator must tick `- [ ] → - [x]` in `.octogent/tentacles/<id>/todo.md` on main and commit. The UI reads `todo.md` from main — workers cannot tick it from their worktrees without merge conflicts. |
+| Prompt edit | Coordinator prompt | Added **nudge mechanism**: if a worker branch shows `ahead=0` AND `agentRuntimeState` is `idle` for more than one poll cycle, coordinator sends a channel message prompting the worker to resume. Uses `curl /api/terminals/<id>` to check runtime state and `octogent channel send` to nudge. |
+| `59b0573` | Coordinator prompt | **Auto-cleanup**: after all worker branches are merged and verified, coordinator deletes each worker terminal (`DELETE /api/terminals/<workerTerminalId>`) then deletes itself (`DELETE /api/terminals/{{terminalId}}`). The canvas clears automatically — no manual cleanup step. |
+
+### Tentacle planner improvements
+
+| Commit | Area | Summary |
+|---|---|---|
+| Prompt edit | Planner prompt | Added **10-option startup menu**: Full run, Propose only, Fill gaps, Re-enrich, Add todos, Prune todos, Status report, Spawn all, Single tentacle, Remap. Operator picks on first message; planner skips phases not needed for the chosen mode. |
+| Prompt edit | Planner prompt | Added **skills discovery step** in Phase 4: scans `.claude/skills/` and injects an `octogent:suggested-skills` block so workers get relevant skill context automatically. |
+
+### State detection
+
+| Commit | Area | Summary |
+|---|---|---|
+| Prompt edit | `agentStateDetection.ts` | Any non-empty output chunk from the PTY now transitions the agent to `processing`. Previously required a regex match against known processing patterns — silent tool calls and non-matching output left the badge stuck at `IDLE`. `PROCESSING_PATTERNS` retained as a secondary check for compatibility. |
+
+### Security & robustness (code-review agent pass)
+
+| Area | Fix |
+|---|---|
+| `requestHandler.ts` | Path traversal prevention: `path.normalize()` + strict prefix check before serving any file from the project directory. |
+| `readDeckTentacles.ts` | `isSafeTentaclePath()` helper blocks `..`, `:`, backslashes, and validates resolved path containment before reading tentacle files. |
+| `MarkdownContent.tsx` | XSS sanitizer hardened: event handler regex catches unquoted values (`onerror=alert(1)`); dangerous tags (`iframe`, `object`, `embed`, `form`, `input`, `textarea`, `button`, `select`) blocked; `data:text/html` URLs blocked. |
+| `sessionRuntime.ts` | `.catch()` on fire-and-forget bootstrap; WebSocket error messages sanitized before forwarding to the client. |
+| `server.ts` / `cli.ts` | `.catch()` on SIGINT/SIGTERM handlers so shutdown errors don't swallow the exit. |
+| `miscRoutes.ts` | `.catch()` on background cache refresh. |
+| `requestParsers.ts` | `JSON.parse` wrapped in try/catch; malformed body returns 400 instead of crashing. |
+| `terminalRuntime.ts` | `drainPendingHookEventsRef` converted to mutable-ref object to satisfy `useConst` lint rule. |
+| `typeCoercion.ts`, `buildTerminalList.ts`, `InMemoryTerminalSnapshotReader.ts` | Defensive improvements in core package. |
+
+### Test coverage additions
+
+| Area | Tests added |
+|---|---|
+| `agentStateDetection.test.ts` | State-machine edge cases including any-chunk-is-processing path |
+| `gitParsers.test.ts` | 33 unit tests for all git parser functions (new file) |
+| `createApiServer.test.ts` | Error path tests for `handleDeckTentacleSwarmRoute` (8 tests) |
+| `monitorCore.test.ts` | Stale-cache boundary tests |
+| `claudeUsage.test.ts` | Retry and grace-period tests for Claude usage polling |
+| `promptResolver.test.ts` | Updated for current swarm-parent content and `claimedIndicesBeforeSpawn` field |
+
+All 303 tests pass. Zero lint errors. Build clean.
 
 ### Fork meta
 
@@ -159,12 +220,14 @@ PTY sessions survive browser reloads during the idle grace period. They do **not
 
 ## How the swarm flow works now
 
-1. **Planner** (`prompts/tentacle-planner.md`) proposes a tentacle layout, gets operator approval, writes `CONTEXT.md` + `todo.md` into the tentacle folder.
+1. **Planner** (`prompts/tentacle-planner.md`) offers a 10-option menu on startup. In full-run mode it proposes a tentacle layout, gets operator approval, writes `CONTEXT.md` + `todo.md` into the tentacle folder.
 2. **Spawn Swarm** button — operator picks worker count (1–9). API allocates claim-indexed worker IDs, spawns worker terminals in their own worktrees with a 500 ms stagger. Last, it spawns the coordinator in shared-mode with the same tentacle scope.
 3. **Workers** read `CONTEXT.md` / `todo.md`, pick an unclaimed `- [ ]` item, implement it, run verification, commit to `octogent/<worker-id>`, and end their **final commit body** with a `DONE:` or `BLOCKED:` marker in the mandated shape.
-4. **Coordinator** runs a 2/5/10-minute tight poll loop (its own tier choice per task size). Each cycle: `git fetch`, check each worker branch for `ahead > 0` + clean worktree, read the last commit body for `DONE:` / `BLOCKED:`. On first delta, exits the poll and either merges or investigates.
-5. **Merges** happen into an integration branch first (`octogent_integration_<tentacle>`), then into `main` after post-merge verification passes.
-6. **Channel messages** (inter-agent IPC) are optional fire-and-forget status; if channel-send fails, the commit is still the real signal.
+4. **Coordinator** runs a 2/5/10-minute tight poll loop (its own tier choice per task size). Each cycle: `git fetch`, check each worker branch for `ahead > 0` + clean worktree, read the last commit body for `DONE:` / `BLOCKED:`. On first delta, exits the poll and either merges or investigates. If a worker shows `ahead=0` and `agentRuntimeState=idle` for more than one cycle, coordinator sends a nudge via the channel API.
+5. **Merges** happen into an integration branch first (`octogent_integration_<tentacle>`), then into `main` after post-merge verification passes. Coordinator ticks the corresponding `- [ ]` → `- [x]` in `todo.md` on `main` and commits.
+6. **Cleanup** — after all merges land, coordinator deletes each worker terminal via `DELETE /api/terminals/<id>`, then deletes itself. The canvas clears automatically.
+7. **Canvas** shows live progress: color-coded `done/total` fraction on incomplete tentacles (white = not started, orange = in progress) and a floating green checkmark when all tasks are done.
+8. **Channel messages** (inter-agent IPC) are optional fire-and-forget status; if channel-send fails, the commit is still the real signal.
 
 ## Docs (upstream)
 
