@@ -289,7 +289,7 @@ export const OctopusNode = ({
       {/* All-done checkmark — top-right corner of the octopus sprite */}
       {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone === node.todoTotal && (() => {
         const cx = glyphW / 2 - glyphW * 0.18;
-        const cy = -glyphH / 2 + glyphH * 0.18;
+        const cy = -glyphH * 0.1;
         const t = glyphW * 0.12;
         return (
           <g transform={`translate(${cx}, ${cy})`}>
