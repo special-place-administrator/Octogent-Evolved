@@ -12,3 +12,6 @@
 **/coverage/
 
 .octogent
+
+# SymForge runtime artifacts
+.symforge/
