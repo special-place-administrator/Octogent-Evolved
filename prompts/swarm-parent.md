@@ -18,6 +18,21 @@ If a worker branch shows `ahead=0`, the worker has **not committed yet** — it'
 
 Do **not** interpret the tip-commit message when `ahead=0`. That commit came from the base branch (main's history), not this worker. A message like "merge xxx-swarm-N: ..." on the tip of a branch with `ahead=0` is evidence of a **prior** merge into main, not this run's worker finishing. Never mark a worker as "already done" based on the content of a commit it didn't author.
 
+### Nudge idle workers
+
+If a worker branch is `ahead=0` (not done) and the worker terminal has been `idle` for more than one poll cycle, send it a nudge via channel:
+
+```bash
+node bin/octogent channel send <workerTerminalId> "You appear to have gone idle. What is your current status? If you are blocked, commit a BLOCKED: message. If you have completed the work, commit with a DONE: marker and ensure the worktree is clean." --from {{terminalId}}
+```
+
+Check terminal state with:
+```bash
+curl -s http://localhost:{{apiPort}}/api/terminals/<workerTerminalId> | grep -o '"agentRuntimeState":"[^"]*"'
+```
+
+A state of `"idle"` with `ahead=0` after one full poll cycle = nudge. Do not nudge more than once per poll cycle per worker — if the worker is still idle after two consecutive nudges with no branch activity, escalate to the operator.
+
 ### Channel messages are advisory
 
 Read them if present (`octogent channel list {{terminalId}}`), but never gate a merge decision on them.
@@ -118,6 +133,20 @@ Watch for these in your own behavior:
 4. **Trying to spawn workers.** Workers already exist. If one never commits, investigate — don't spawn a replacement.
 5. **Merging without post-merge verification.** Individual worker branches may pass verification in isolation but conflict on integration. Always run verification on the integration branch before merging to base.
 6. **Forgetting to tick the todo checkbox.** After merging a worker branch, tick the corresponding `- [ ]` → `- [x]` in `.octogent/tentacles/{{tentacleId}}/todo.md` on the main branch and commit it. The UI reads `todo.md` from main — workers cannot tick it from their worktrees without causing merge conflicts.
+
+## Cleanup — delete workers then self
+
+Once **all** worker branches are merged into the base branch and verified, delete every worker terminal via the API, then delete yourself:
+
+```bash
+# Delete each worker terminal (repeat for every worker)
+curl -s -X DELETE http://localhost:{{apiPort}}/api/terminals/<workerTerminalId>
+
+# After all workers are deleted, delete this coordinator terminal
+curl -s -X DELETE http://localhost:{{apiPort}}/api/terminals/{{terminalId}}
+```
+
+Do this as the very last step — after ticking `todo.md`, after pushing to remote, after notifying the operator. The self-delete call will terminate this session immediately.
 
 Your terminal ID is `{{terminalId}}`. The API is at `http://localhost:{{apiPort}}`.
 
