@@ -111,6 +111,8 @@ export const DeckPrimaryView = ({
 
   useEffect(() => {
     void fetchTentacles();
+    const interval = setInterval(() => { void fetchTentacles(); }, 10_000);
+    return () => { clearInterval(interval); };
   }, [fetchTentacles]);
 
   useEffect(() => {
