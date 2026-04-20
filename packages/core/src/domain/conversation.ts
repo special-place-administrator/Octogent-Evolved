@@ -6,6 +6,13 @@ export type ConversationTurn = {
   endedAt: string;
 };
 
+/**
+ * A low-level event recorded in the conversation transcript stream.
+ * - `session_start` / `session_end` — session lifecycle boundaries
+ * - `input_submit` — user submitted a prompt
+ * - `output_chunk` — a partial assistant response streamed to the UI
+ * - `state_change` — agent runtime state transitioned (e.g. idle → processing)
+ */
 export type ConversationTranscriptEvent = {
   eventId: string;
   sessionId: string;
@@ -24,8 +31,11 @@ export type ConversationSessionSummary = {
   turnCount: number;
   userTurnCount: number;
   assistantTurnCount: number;
+  /** Truncated text of the first user message in this session, for list previews. */
   firstUserTurnPreview: string | null;
+  /** Truncated text of the most recent user message, for list previews. */
   lastUserTurnPreview: string | null;
+  /** Truncated text of the most recent assistant message, for list previews. */
   lastAssistantTurnPreview: string | null;
 };
 
