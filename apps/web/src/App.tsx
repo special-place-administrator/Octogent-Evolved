@@ -548,18 +548,28 @@ export const App = () => {
               onCanvasTerminalsPanelWidthChange: setCanvasTerminalsPanelWidth,
               onCreateAgent: async (tentacleId, workspaceMode) => {
                 const mode = workspaceMode ?? "shared";
+                const isOctoboss = tentacleId === OCTOBOSS_ID;
                 const response = await fetch("/api/terminals", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    workspaceMode: mode,
-                    tentacleId,
-                    name: tentacleId,
-                    ...(mode === "worktree" ? { worktreeId: tentacleId } : {}),
-                    agentProvider: "claude-code",
-                    promptTemplate: "tentacle-worker",
-                    promptVariables: { tentacleId },
-                  }),
+                  body: JSON.stringify(
+                    isOctoboss
+                      ? {
+                          workspaceMode: "shared",
+                          name: "tentacle-planner",
+                          agentProvider: "claude-code",
+                          promptTemplate: "tentacle-planner",
+                        }
+                      : {
+                          workspaceMode: mode,
+                          tentacleId,
+                          name: tentacleId,
+                          ...(mode === "worktree" ? { worktreeId: tentacleId } : {}),
+                          agentProvider: "claude-code",
+                          promptTemplate: "tentacle-worker",
+                          promptVariables: { tentacleId },
+                        },
+                  ),
                 });
                 if (!response.ok) {
                   const errorBody = await response.text().catch(() => response.statusText);
