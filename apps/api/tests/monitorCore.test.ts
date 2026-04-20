@@ -66,6 +66,85 @@ describe("monitor core logic", () => {
     ).toBe(true);
   });
 
+  describe("isMonitorCacheStale — stale-cache boundary conditions", () => {
+    const now = new Date("2026-02-28T12:00:00.000Z");
+    const maxCacheAgeMs = 60 * 60 * 1000; // 1 hour
+    const terms = ["Codex", "AI Engineering"];
+
+    it("is stale at exactly maxCacheAgeMs (>= boundary is stale)", () => {
+      // now - lastFetchedAt === maxCacheAgeMs exactly → stale
+      const lastFetchedAt = new Date(now.getTime() - maxCacheAgeMs).toISOString();
+      expect(
+        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt, cachedQueryTerms: terms, currentQueryTerms: terms }),
+      ).toBe(true);
+    });
+
+    it("is fresh one millisecond before the stale boundary", () => {
+      // now - lastFetchedAt === maxCacheAgeMs - 1 → still fresh
+      const lastFetchedAt = new Date(now.getTime() - (maxCacheAgeMs - 1)).toISOString();
+      expect(
+        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt, cachedQueryTerms: terms, currentQueryTerms: terms }),
+      ).toBe(false);
+    });
+
+    it("is stale when lastFetchedAt is an empty string", () => {
+      expect(
+        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt: "", cachedQueryTerms: terms, currentQueryTerms: terms }),
+      ).toBe(true);
+    });
+
+    it("is stale when lastFetchedAt is an unparseable string", () => {
+      expect(
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt: "not-a-date",
+          cachedQueryTerms: terms,
+          currentQueryTerms: terms,
+        }),
+      ).toBe(true);
+    });
+
+    it("is stale when query term order differs (positional match)", () => {
+      const lastFetchedAt = new Date(now.getTime() - 1000).toISOString();
+      expect(
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt,
+          cachedQueryTerms: ["AI Engineering", "Codex"],
+          currentQueryTerms: ["Codex", "AI Engineering"],
+        }),
+      ).toBe(true);
+    });
+
+    it("is stale when cached has fewer terms than current", () => {
+      const lastFetchedAt = new Date(now.getTime() - 1000).toISOString();
+      expect(
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt,
+          cachedQueryTerms: ["Codex"],
+          currentQueryTerms: ["Codex", "AI Engineering"],
+        }),
+      ).toBe(true);
+    });
+
+    it("is fresh when both query term lists are empty and cache is young", () => {
+      const lastFetchedAt = new Date(now.getTime() - 1000).toISOString();
+      expect(
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt,
+          cachedQueryTerms: [],
+          currentQueryTerms: [],
+        }),
+      ).toBe(false);
+    });
+  });
+
   it("dedupes, ranks by like count desc, and limits to top 30", () => {
     const basePosts: MonitorPost[] = Array.from({ length: 32 }).map((_, index) => ({
       source: "x",

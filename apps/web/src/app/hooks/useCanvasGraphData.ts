@@ -290,6 +290,7 @@ export const useCanvasGraphData = ({
       color,
       ...(firstActiveTerminal ? { workspaceMode: firstActiveTerminal.workspaceMode } : {}),
       ...(deck?.octopus ? { octopus: deck.octopus } : {}),
+      ...(deck ? { todoTotal: deck.todoTotal, todoDone: deck.todoDone } : {}),
     };
     nodes.push(node);
     currentNodesById.set(tentacleNodeId, node);
