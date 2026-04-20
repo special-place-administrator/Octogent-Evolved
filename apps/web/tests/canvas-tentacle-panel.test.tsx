@@ -67,8 +67,8 @@ describe("CanvasTentaclePanel actions", () => {
     fireEvent.click(worktreeButton);
     fireEvent.click(normalButton);
 
-    expect(onSpawnSwarm).toHaveBeenNthCalledWith(1, "docs-knowledge", "worktree");
-    expect(onSpawnSwarm).toHaveBeenNthCalledWith(2, "docs-knowledge", "shared");
+    expect(onSpawnSwarm).toHaveBeenNthCalledWith(1, "docs-knowledge", "worktree", 3);
+    expect(onSpawnSwarm).toHaveBeenNthCalledWith(2, "docs-knowledge", "shared", 3);
   });
 
   it("spawns a dedicated agent for an individual todo item", async () => {

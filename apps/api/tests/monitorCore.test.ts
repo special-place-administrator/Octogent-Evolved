@@ -75,7 +75,13 @@ describe("monitor core logic", () => {
       // now - lastFetchedAt === maxCacheAgeMs exactly → stale
       const lastFetchedAt = new Date(now.getTime() - maxCacheAgeMs).toISOString();
       expect(
-        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt, cachedQueryTerms: terms, currentQueryTerms: terms }),
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt,
+          cachedQueryTerms: terms,
+          currentQueryTerms: terms,
+        }),
       ).toBe(true);
     });
 
@@ -83,13 +89,25 @@ describe("monitor core logic", () => {
       // now - lastFetchedAt === maxCacheAgeMs - 1 → still fresh
       const lastFetchedAt = new Date(now.getTime() - (maxCacheAgeMs - 1)).toISOString();
       expect(
-        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt, cachedQueryTerms: terms, currentQueryTerms: terms }),
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt,
+          cachedQueryTerms: terms,
+          currentQueryTerms: terms,
+        }),
       ).toBe(false);
     });
 
     it("is stale when lastFetchedAt is an empty string", () => {
       expect(
-        isMonitorCacheStale({ now, maxCacheAgeMs, lastFetchedAt: "", cachedQueryTerms: terms, currentQueryTerms: terms }),
+        isMonitorCacheStale({
+          now,
+          maxCacheAgeMs,
+          lastFetchedAt: "",
+          cachedQueryTerms: terms,
+          currentQueryTerms: terms,
+        }),
       ).toBe(true);
     });
 

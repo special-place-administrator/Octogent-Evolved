@@ -92,7 +92,7 @@ const createFakeDeps = () => {
 // Boilerplate: build a hookProcessor + sessionRuntime pair wired together
 // the same way terminalRuntime.ts wires them (late-bound drain callback).
 const buildWiredRuntime = (deps: ReturnType<typeof createFakeDeps>) => {
-  let drainRef: ((sid: string) => void) | undefined;
+  const drainRef: { current: ((sid: string) => void) | undefined } = { current: undefined };
 
   const sessionRuntime = createSessionRuntime({
     websocketServer: new FakeWebSocketServer() as unknown as import("ws").WebSocketServer,
@@ -105,7 +105,7 @@ const buildWiredRuntime = (deps: ReturnType<typeof createFakeDeps>) => {
     transcriptDirectoryPath: deps.transcriptDirectoryPath,
     sessionIdleGraceMs: 60_000,
     scrollbackMaxBytes: 4096,
-    onSessionRegistered: (sid: string) => drainRef?.(sid),
+    onSessionRegistered: (sid: string) => drainRef.current?.(sid),
   });
 
   const hookProcessor = createHookProcessor({
@@ -116,7 +116,7 @@ const buildWiredRuntime = (deps: ReturnType<typeof createFakeDeps>) => {
     persistRegistry: deps.persistRegistry,
     deliverChannelMessages: deps.deliverChannelMessages,
   });
-  drainRef = hookProcessor.drainPendingHookEvents;
+  drainRef.current = hookProcessor.drainPendingHookEvents;
 
   return { sessionRuntime, hookProcessor };
 };
@@ -141,12 +141,7 @@ const registerClaudeTerminal = (
 const fireIdlePrompt = (
   hookProcessor: ReturnType<typeof createHookProcessor>,
   terminalId: string,
-) =>
-  hookProcessor.handleHook(
-    "notification",
-    { notification_type: "idle_prompt" },
-    terminalId,
-  );
+) => hookProcessor.handleHook("notification", { notification_type: "idle_prompt" }, terminalId);
 
 const fireUserPromptSubmit = (
   hookProcessor: ReturnType<typeof createHookProcessor>,
@@ -165,7 +160,7 @@ describe("hook-gated bootstrap", () => {
   const tempDirs: string[] = [];
 
   beforeEach(() => {
-    delete process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP;
+    process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = undefined;
     createShellEnvironmentMock.mockClear();
     ensureSpawnHelperMock.mockClear();
     spawnMock.mockReset();
@@ -358,10 +353,10 @@ describe("hook-gated bootstrap", () => {
 
     // Progress through phases 1 and 2.
     fireIdlePrompt(hookProcessor, "tentacle-4");
-    await vi.waitFor(
-      () => expect(pty.writes).toContain("/effort auto\r"),
-      { timeout: 1000, interval: 20 },
-    );
+    await vi.waitFor(() => expect(pty.writes).toContain("/effort auto\r"), {
+      timeout: 1000,
+      interval: 20,
+    });
     fireIdlePrompt(hookProcessor, "tentacle-4");
 
     // Paste lands.
@@ -413,9 +408,7 @@ describe("hook-gated bootstrap", () => {
         SessionStart: [
           {
             matcher: "*",
-            hooks: [
-              { type: "command", command: "echo 'user hook ran'", timeout: 5 },
-            ],
+            hooks: [{ type: "command", command: "echo 'user hook ran'", timeout: 5 }],
           },
         ],
       },
@@ -442,9 +435,7 @@ describe("hook-gated bootstrap", () => {
     }>;
     expect(sessionStartEntries.length).toBeGreaterThanOrEqual(1);
 
-    const allCommands = sessionStartEntries
-      .flatMap((entry) => entry.hooks)
-      .map((h) => h.command);
+    const allCommands = sessionStartEntries.flatMap((entry) => entry.hooks).map((h) => h.command);
     expect(allCommands).toContain("echo 'user hook ran'");
     expect(allCommands.some((cmd) => cmd.includes("/api/hooks/session-start"))).toBe(true);
   });
@@ -532,9 +523,7 @@ describe("hook-gated bootstrap", () => {
 
     // No session should have exceeded the max paste attempts (3).
     for (const pty of ptys) {
-      const pasteCount = pty.writes.filter((w) =>
-        w.includes(BRACKETED_PASTE_START),
-      ).length;
+      const pasteCount = pty.writes.filter((w) => w.includes(BRACKETED_PASTE_START)).length;
       expect(pasteCount).toBeLessThanOrEqual(3);
       expect(pasteCount).toBeGreaterThanOrEqual(1);
     }
@@ -555,9 +544,7 @@ describe("hook-gated bootstrap", () => {
         SessionStart: [
           {
             matcher: "*",
-            hooks: [
-              { type: "command", command: "echo 'user hook'", timeout: 5 },
-            ],
+            hooks: [{ type: "command", command: "echo 'user hook'", timeout: 5 }],
           },
         ],
         PreToolUse: [
@@ -636,9 +623,7 @@ describe("hook-gated bootstrap", () => {
     // Fresh command entries exist for each of the three converted hooks,
     // pointing at the current API base (not the stale old-host URL).
     const collectCommands = (event: string): string[] =>
-      (merged.hooks[event] ?? [])
-        .flatMap((entry) => entry.hooks)
-        .map((h) => h.command ?? "");
+      (merged.hooks[event] ?? []).flatMap((entry) => entry.hooks).map((h) => h.command ?? "");
 
     const preToolUseCommands = collectCommands("PreToolUse");
     expect(preToolUseCommands.some((c) => c.startsWith("curl -s -X POST"))).toBe(true);

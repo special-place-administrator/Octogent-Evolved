@@ -236,7 +236,9 @@ describe("parseTentaclePullRequestCreateInput", () => {
   });
 
   it("includes body when provided as string", () => {
-    expect(parseTentaclePullRequestCreateInput({ title: "My PR", body: "Some description" })).toEqual({
+    expect(
+      parseTentaclePullRequestCreateInput({ title: "My PR", body: "Some description" }),
+    ).toEqual({
       title: "My PR",
       body: "Some description",
       baseRef: null,

@@ -132,7 +132,7 @@ describe("createSessionRuntime", () => {
     process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = "0";
     return () => {
       if (previous === undefined) {
-        delete process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP;
+        process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = undefined;
       } else {
         process.env.OCTOGENT_HOOK_GATED_BOOTSTRAP = previous;
       }
@@ -475,63 +475,62 @@ describe("createSessionRuntime", () => {
     const restoreBootstrapMode = pinLegacyBootstrap();
     vi.useFakeTimers();
     try {
-
-    const tentacleId = "tentacle-1";
-    const terminals = new Map<string, PersistedTerminal>([
-      [
-        tentacleId,
-        {
-          terminalId: tentacleId,
+      const tentacleId = "tentacle-1";
+      const terminals = new Map<string, PersistedTerminal>([
+        [
           tentacleId,
-          tentacleName: tentacleId,
-          createdAt: new Date().toISOString(),
-          workspaceMode: "shared",
-          initialPrompt: "Investigate and report back.",
-        },
-      ],
-    ]);
-    const sessions = new Map<string, TerminalSession>();
-    const websocketServer = new FakeWebSocketServer();
-    const pty = new FakePty();
-    const transcriptDirectoryPath = createTemporaryDirectory();
-    spawnMock.mockReturnValue(pty);
+          {
+            terminalId: tentacleId,
+            tentacleId,
+            tentacleName: tentacleId,
+            createdAt: new Date().toISOString(),
+            workspaceMode: "shared",
+            initialPrompt: "Investigate and report back.",
+          },
+        ],
+      ]);
+      const sessions = new Map<string, TerminalSession>();
+      const websocketServer = new FakeWebSocketServer();
+      const pty = new FakePty();
+      const transcriptDirectoryPath = createTemporaryDirectory();
+      spawnMock.mockReturnValue(pty);
 
-    const runtime = createSessionRuntime({
-      websocketServer: websocketServer as unknown as import("ws").WebSocketServer,
-      terminals,
-      sessions,
-      getTentacleWorkspaceCwd: () => process.cwd(),
-      isDebugPtyLogsEnabled: false,
-      ptyLogDir: process.cwd(),
-      transcriptDirectoryPath,
-      sessionIdleGraceMs: 1000,
-      scrollbackMaxBytes: 1024,
-    });
+      const runtime = createSessionRuntime({
+        websocketServer: websocketServer as unknown as import("ws").WebSocketServer,
+        terminals,
+        sessions,
+        getTentacleWorkspaceCwd: () => process.cwd(),
+        isDebugPtyLogsEnabled: false,
+        ptyLogDir: process.cwd(),
+        transcriptDirectoryPath,
+        sessionIdleGraceMs: 1000,
+        scrollbackMaxBytes: 1024,
+      });
 
-    expect(runtime.startSession(tentacleId)).toBe(true);
-    expect(sessions.has(tentacleId)).toBe(true);
-    expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
+      expect(runtime.startSession(tentacleId)).toBe(true);
+      expect(sessions.has(tentacleId)).toBe(true);
+      expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
 
-    // Legacy claude-code bootstrap schedule:
-    //   t+4000ms  → "/effort auto\r"
-    //   t+4600ms  → bracketed-paste initial prompt
-    //   t+6600ms  → "\r" submit
-    vi.advanceTimersByTime(4_000);
-    expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
+      // Legacy claude-code bootstrap schedule:
+      //   t+4000ms  → "/effort auto\r"
+      //   t+4600ms  → bracketed-paste initial prompt
+      //   t+6600ms  → "\r" submit
+      vi.advanceTimersByTime(4_000);
+      expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
 
-    vi.advanceTimersByTime(600);
-    expect(pty.write).toHaveBeenNthCalledWith(
-      3,
-      "\u001b[200~Investigate and report back.\u001b[201~",
-    );
+      vi.advanceTimersByTime(600);
+      expect(pty.write).toHaveBeenNthCalledWith(
+        3,
+        "\u001b[200~Investigate and report back.\u001b[201~",
+      );
 
-    vi.advanceTimersByTime(2_000);
-    expect(pty.write).toHaveBeenNthCalledWith(4, "\r");
+      vi.advanceTimersByTime(2_000);
+      expect(pty.write).toHaveBeenNthCalledWith(4, "\r");
 
-    vi.advanceTimersByTime(10_000);
-    expect(sessions.has(tentacleId)).toBe(true);
+      vi.advanceTimersByTime(10_000);
+      expect(sessions.has(tentacleId)).toBe(true);
 
-    runtime.close();
+      runtime.close();
     } finally {
       restoreBootstrapMode();
     }
@@ -541,60 +540,62 @@ describe("createSessionRuntime", () => {
     const restoreBootstrapMode = pinLegacyBootstrap();
     vi.useFakeTimers();
     try {
-
-    const tentacleId = "tentacle-1";
-    const terminals = new Map<string, PersistedTerminal>([
-      [
-        tentacleId,
-        {
-          terminalId: tentacleId,
+      const tentacleId = "tentacle-1";
+      const terminals = new Map<string, PersistedTerminal>([
+        [
           tentacleId,
-          tentacleName: tentacleId,
-          createdAt: new Date().toISOString(),
-          workspaceMode: "shared",
-          initialInputDraft: "You are working on docs.",
-        },
-      ],
-    ]);
-    const sessions = new Map<string, TerminalSession>();
-    const websocketServer = new FakeWebSocketServer();
-    const pty = new FakePty();
-    const transcriptDirectoryPath = createTemporaryDirectory();
-    spawnMock.mockReturnValue(pty);
+          {
+            terminalId: tentacleId,
+            tentacleId,
+            tentacleName: tentacleId,
+            createdAt: new Date().toISOString(),
+            workspaceMode: "shared",
+            initialInputDraft: "You are working on docs.",
+          },
+        ],
+      ]);
+      const sessions = new Map<string, TerminalSession>();
+      const websocketServer = new FakeWebSocketServer();
+      const pty = new FakePty();
+      const transcriptDirectoryPath = createTemporaryDirectory();
+      spawnMock.mockReturnValue(pty);
 
-    const runtime = createSessionRuntime({
-      websocketServer: websocketServer as unknown as import("ws").WebSocketServer,
-      terminals,
-      sessions,
-      getTentacleWorkspaceCwd: () => process.cwd(),
-      isDebugPtyLogsEnabled: false,
-      ptyLogDir: process.cwd(),
-      transcriptDirectoryPath,
-      sessionIdleGraceMs: 1_000,
-      scrollbackMaxBytes: 1_024,
-    });
+      const runtime = createSessionRuntime({
+        websocketServer: websocketServer as unknown as import("ws").WebSocketServer,
+        terminals,
+        sessions,
+        getTentacleWorkspaceCwd: () => process.cwd(),
+        isDebugPtyLogsEnabled: false,
+        ptyLogDir: process.cwd(),
+        transcriptDirectoryPath,
+        sessionIdleGraceMs: 1_000,
+        scrollbackMaxBytes: 1_024,
+      });
 
-    const socket = new FakeWebSocket();
-    websocketServer.nextSocket = socket;
-    expect(
-      runtime.handleUpgrade(createUpgradeRequest(tentacleId), {} as Duplex, Buffer.alloc(0)),
-    ).toBe(true);
+      const socket = new FakeWebSocket();
+      websocketServer.nextSocket = socket;
+      expect(
+        runtime.handleUpgrade(createUpgradeRequest(tentacleId), {} as Duplex, Buffer.alloc(0)),
+      ).toBe(true);
 
-    expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
+      expect(pty.write).toHaveBeenNthCalledWith(1, "claude --dangerously-skip-permissions\r");
 
-    // Legacy claude-code bootstrap for a DRAFT (no initial prompt, just a
-    // pre-filled input buffer): /effort auto at +4000ms, draft paste at
-    // +4600ms, then no Enter (the user submits manually).
-    vi.advanceTimersByTime(4_000);
-    expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
+      // Legacy claude-code bootstrap for a DRAFT (no initial prompt, just a
+      // pre-filled input buffer): /effort auto at +4000ms, draft paste at
+      // +4600ms, then no Enter (the user submits manually).
+      vi.advanceTimersByTime(4_000);
+      expect(pty.write).toHaveBeenNthCalledWith(2, "/effort auto\r");
 
-    vi.advanceTimersByTime(600);
-    expect(pty.write).toHaveBeenNthCalledWith(3, "\u001b[200~You are working on docs.\u001b[201~");
+      vi.advanceTimersByTime(600);
+      expect(pty.write).toHaveBeenNthCalledWith(
+        3,
+        "\u001b[200~You are working on docs.\u001b[201~",
+      );
 
-    vi.advanceTimersByTime(2_000);
-    expect(pty.write).toHaveBeenCalledTimes(3);
+      vi.advanceTimersByTime(2_000);
+      expect(pty.write).toHaveBeenCalledTimes(3);
 
-    runtime.close();
+      runtime.close();
     } finally {
       restoreBootstrapMode();
     }

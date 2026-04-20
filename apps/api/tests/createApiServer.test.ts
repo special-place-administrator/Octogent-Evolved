@@ -2669,8 +2669,15 @@ describe("createApiServer", () => {
       },
     });
     expect(deleteResponse.status).toBe(204);
-    expect(gitClient.getWorktree(expectedWorktreePath)).toBeNull();
-    expect(gitClient.hasBranch("octogent/terminal-1")).toBe(false);
+    // Tentacle-scoped worktrees are preserved across terminal lifecycles so
+    // sequential workers can resume on the previous branch.
+    expect(gitClient.getWorktree(expectedWorktreePath)).toEqual(
+      expect.objectContaining({
+        cwd: workspaceCwd,
+        branchName: "octogent/terminal-1",
+      }),
+    );
+    expect(gitClient.hasBranch("octogent/terminal-1")).toBe(true);
   });
 
   it("returns 409 and keeps tentacle state when worktree deletion fails", async () => {
@@ -2703,10 +2710,9 @@ describe("createApiServer", () => {
         Accept: "application/json",
       },
     });
-    expect(deleteResponse.status).toBe(409);
-    await expect(deleteResponse.json()).resolves.toEqual({
-      error: expect.stringContaining("Unable to remove worktree for terminal-1"),
-    });
+    // Tentacle-scoped worktrees are preserved; non-tentacle-scoped worktree
+    // removal failures are best-effort and do not block deletion.
+    expect(deleteResponse.status).toBe(204);
     expect(gitClient.getWorktree(expectedWorktreePath)).toEqual(
       expect.objectContaining({
         cwd: workspaceCwd,
@@ -2722,7 +2728,7 @@ describe("createApiServer", () => {
     });
     expect(listResponse.status).toBe(200);
     await expect(listResponse.json()).resolves.toEqual(
-      expect.arrayContaining([
+      expect.not.arrayContaining([
         expect.objectContaining({
           terminalId: "terminal-1",
           tentacleId: "terminal-1",
@@ -3145,7 +3151,8 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: "No free todo items available — all incomplete items are already claimed by active workers.",
+      error:
+        "No free todo items available — all incomplete items are already claimed by active workers.",
       claimedIndices: [0],
     });
   });
@@ -3232,6 +3239,7 @@ describe("createApiServer", () => {
     await expect(swarmResponse.json()).resolves.toEqual({
       tentacleId: "docs-knowledge",
       parentTerminalId: "docs-knowledge-swarm-parent",
+      claimedIndicesBeforeSpawn: [],
       workers: Array.from({ length: MAX_CHILDREN_PER_PARENT }, (_, index) => ({
         terminalId: `docs-knowledge-swarm-${index}`,
         todoIndex: index,
@@ -3244,7 +3252,7 @@ describe("createApiServer", () => {
       "utf8",
     );
     expect(promptTemplate).toContain(
-      "Treat the listed workers as the highest-priority items and proceed without asking the user whether to batch, reprioritize, or raise the limit.",
+      "You are the swarm coordinator for the **{{tentacleName}}** tentacle.",
     );
   });
 
@@ -3419,7 +3427,9 @@ describe("createApiServer", () => {
       body: JSON.stringify({}),
     });
     expect(missingText.status).toBe(400);
-    await expect(missingText.json()).resolves.toEqual({ error: "text (non-empty string) is required" });
+    await expect(missingText.json()).resolves.toEqual({
+      error: "text (non-empty string) is required",
+    });
 
     const blankText = await fetch(`${baseUrl}/api/deck/tentacles/my-tentacle/todo`, {
       method: "POST",
@@ -3427,7 +3437,9 @@ describe("createApiServer", () => {
       body: JSON.stringify({ text: "   " }),
     });
     expect(blankText.status).toBe(400);
-    await expect(blankText.json()).resolves.toEqual({ error: "text (non-empty string) is required" });
+    await expect(blankText.json()).resolves.toEqual({
+      error: "text (non-empty string) is required",
+    });
   });
 
   it("todo-add: returns 404 when tentacle todo.md does not exist", async () => {
