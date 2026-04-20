@@ -289,18 +289,13 @@ export const OctopusNode = ({
       {/* All-done checkmark — top-right corner of the octopus sprite */}
       {!isOctoboss && node.todoTotal != null && node.todoTotal > 0 && node.todoDone === node.todoTotal && (() => {
         const cx = glyphW / 2 - glyphW * 0.18;
-        const cy = -glyphH * 0.1;
+        const cy = glyphH * 0.1;
         const t = glyphW * 0.12;
+        const pts = `${-t},0 ${-t * 0.1},${t} ${t},${-t * 0.8}`;
         return (
           <g transform={`translate(${cx}, ${cy})`}>
-            <polyline
-              points={`${-t},0 ${-t * 0.1},${t} ${t},${-t * 0.8}`}
-              fill="none"
-              stroke="#22c55e"
-              strokeWidth={t * 0.55}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+            <polyline points={pts} fill="none" stroke="black" strokeWidth={t * 1.1} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
+            <polyline points={pts} fill="none" stroke="#22c55e" strokeWidth={t * 0.55} strokeLinecap="round" strokeLinejoin="round" />
           </g>
         );
       })()}
