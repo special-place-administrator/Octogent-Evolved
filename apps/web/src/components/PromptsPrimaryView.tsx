@@ -75,7 +75,7 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
   useEffect(() => {
     onSidebarContent?.(sidebarContent);
     return () => onSidebarContent?.(null);
-  });
+  }, [onSidebarContent, sidebarContent]);
   const [newPromptMode, setNewPromptMode] = useState<NewPromptMode>(null);
   const [isCreatingTerminal, setIsCreatingTerminal] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);

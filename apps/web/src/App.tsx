@@ -607,7 +607,9 @@ export const App = () => {
                   );
                   return;
                 }
-                await refreshColumns();
+                // Swarm workers are created asynchronously; the WebSocket will
+                // deliver terminal events and trigger a debounced refresh.
+                // Avoid an eager snapshot refresh that would return stale data.
               },
               onOctobossAction: async (action) => {
                 const response = await fetch("/api/terminals", {

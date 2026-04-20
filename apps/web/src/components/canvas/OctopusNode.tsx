@@ -319,7 +319,7 @@ export const OctopusNode = ({
           );
         })()}
 
-      {/* Todo progress fraction — shown on incomplete tentacles, same position as checkmark */}
+      {/* Todo progress fraction — white=not started, orange=in progress */}
       {!isOctoboss &&
         node.todoTotal != null &&
         node.todoTotal > 0 &&
@@ -335,7 +335,7 @@ export const OctopusNode = ({
             strokeWidth={glyphW * 0.04}
             strokeLinejoin="round"
             paintOrder="stroke"
-            fill="white"
+            fill={node.todoDone === 0 ? "white" : "#f97316"}
           >
             {node.todoDone}/{node.todoTotal}
           </text>

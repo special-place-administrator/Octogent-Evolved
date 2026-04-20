@@ -101,7 +101,7 @@ export const ConversationsPrimaryView = ({
   useEffect(() => {
     onSidebarContent?.(sidebarContent);
     return () => onSidebarContent?.(null);
-  });
+  }, [onSidebarContent, sidebarContent]);
 
   // Push action panel for clear-all dialog
   const actionPanelContent = isPendingClearAll ? (

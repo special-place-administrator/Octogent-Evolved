@@ -78,16 +78,10 @@ type CanvasTentaclePanelProps = {
   panelRef?: Ref<HTMLDivElement> | undefined;
   tentacle: DeckTentacleSummary | null;
   sessions: ConversationSessionSummary[];
-  onCreateAgent?:
-    | ((tentacleId: string, workspaceMode?: TentacleWorkspaceMode) => void)
-    | undefined;
+  onCreateAgent?: ((tentacleId: string, workspaceMode?: TentacleWorkspaceMode) => void) | undefined;
   onSolveTodoItem?: ((tentacleId: string, itemIndex: number) => void) | undefined;
   onSpawnSwarm?:
-    | ((
-        tentacleId: string,
-        workspaceMode: TentacleWorkspaceMode,
-        maxWorkers?: number,
-      ) => void)
+    | ((tentacleId: string, workspaceMode: TentacleWorkspaceMode, maxWorkers?: number) => void)
     | undefined;
   onNavigateToConversation?: ((sessionId: string) => void) | undefined;
   onRefreshTentacleData?: (() => Promise<void>) | undefined;
