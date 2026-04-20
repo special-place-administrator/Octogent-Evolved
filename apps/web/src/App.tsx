@@ -622,14 +622,23 @@ export const App = () => {
                 // Avoid an eager snapshot refresh that would return stale data.
               },
               onOctobossAction: async (action) => {
+                const body =
+                  action === "launch-planner"
+                    ? {
+                        workspaceMode: "shared",
+                        name: "tentacle-planner",
+                        agentProvider: "claude-code",
+                        promptTemplate: "tentacle-planner",
+                      }
+                    : {
+                        workspaceMode: "shared",
+                        tentacleId: OCTOBOSS_ID,
+                        promptTemplate: action,
+                      };
                 const response = await fetch("/api/terminals", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    workspaceMode: "shared",
-                    tentacleId: OCTOBOSS_ID,
-                    promptTemplate: action,
-                  }),
+                  body: JSON.stringify(body),
                 });
                 if (!response.ok) return undefined;
                 const snapshot = (await response.json()) as { terminalId?: string };

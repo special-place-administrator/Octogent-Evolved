@@ -1446,6 +1446,16 @@ export const CanvasPrimaryView = ({
                 <button
                   type="button"
                   className="canvas-context-menu-item"
+                  onClick={() => handleOctobossAction("launch-planner")}
+                >
+                  <span className="canvas-context-menu-icon">
+                    <Sparkles size={14} />
+                  </span>
+                  Launch Planner
+                </button>
+                <button
+                  type="button"
+                  className="canvas-context-menu-item"
                   onClick={() => handleOctobossAction("octoboss-reorganize-todos")}
                 >
                   <span className="canvas-context-menu-icon">
