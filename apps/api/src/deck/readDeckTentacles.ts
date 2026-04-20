@@ -7,7 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import type {
   DeckAvailableSkill,
@@ -27,6 +27,21 @@ const TENTACLES_DIR = ".octogent/tentacles";
 const DECK_STATE_PATH = ".octogent/state/deck.json";
 
 const VALID_STATUSES: ReadonlySet<string> = new Set(["idle", "active", "blocked", "needs-review"]);
+
+const INVALID_TENTACLE_ID_CHARS = /[\\/:.]/;
+
+const isSafeTentaclePath = (
+  workspaceCwd: string,
+  tentacleId: string,
+  ...segments: string[]
+): string | null => {
+  if (INVALID_TENTACLE_ID_CHARS.test(tentacleId)) return null;
+  const baseDir = resolve(workspaceCwd, TENTACLES_DIR);
+  const filePath = resolve(baseDir, tentacleId, ...segments);
+  const prefix = baseDir.endsWith(sep) ? baseDir : `${baseDir}${sep}`;
+  if (!filePath.startsWith(prefix) && filePath !== baseDir) return null;
+  return filePath;
+};
 
 // ─── Deck state (app metadata, separate from agent-facing files) ────────────
 
@@ -266,11 +281,9 @@ export const readDeckVaultFile = (
   tentacleId: string,
   fileName: string,
 ): string | null => {
-  // Prevent path traversal
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-  if (fileName.includes("..") || fileName.includes("/")) return null;
-
-  const filePath = join(workspaceCwd, TENTACLES_DIR, tentacleId, fileName);
+  if (fileName.includes("..") || fileName.includes("/") || fileName.includes("\\")) return null;
+  const filePath = isSafeTentaclePath(workspaceCwd, tentacleId, fileName);
+  if (!filePath) return null;
 
   if (!existsSync(filePath)) return null;
 
@@ -290,9 +303,8 @@ export const toggleTodoItem = (
   itemIndex: number,
   done: boolean,
 ): { total: number; done: number; items: { text: string; done: boolean }[] } | null => {
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-
-  const filePath = join(workspaceCwd, TENTACLES_DIR, tentacleId, "todo.md");
+  const filePath = isSafeTentaclePath(workspaceCwd, tentacleId, "todo.md");
+  if (!filePath) return null;
   if (!existsSync(filePath)) return null;
 
   let content: string;
@@ -341,9 +353,8 @@ export const editTodoItem = (
   itemIndex: number,
   text: string,
 ): { total: number; done: number; items: { text: string; done: boolean }[] } | null => {
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-
-  const filePath = join(workspaceCwd, TENTACLES_DIR, tentacleId, "todo.md");
+  const filePath = isSafeTentaclePath(workspaceCwd, tentacleId, "todo.md");
+  if (!filePath) return null;
   if (!existsSync(filePath)) return null;
 
   let content: string;
@@ -391,9 +402,8 @@ export const addTodoItem = (
   tentacleId: string,
   text: string,
 ): { total: number; done: number; items: { text: string; done: boolean }[] } | null => {
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-
-  const filePath = join(workspaceCwd, TENTACLES_DIR, tentacleId, "todo.md");
+  const filePath = isSafeTentaclePath(workspaceCwd, tentacleId, "todo.md");
+  if (!filePath) return null;
   if (!existsSync(filePath)) return null;
 
   let content: string;
@@ -423,9 +433,8 @@ export const deleteTodoItem = (
   tentacleId: string,
   itemIndex: number,
 ): { total: number; done: number; items: { text: string; done: boolean }[] } | null => {
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-
-  const filePath = join(workspaceCwd, TENTACLES_DIR, tentacleId, "todo.md");
+  const filePath = isSafeTentaclePath(workspaceCwd, tentacleId, "todo.md");
+  if (!filePath) return null;
   if (!existsSync(filePath)) return null;
 
   let content: string;
@@ -487,7 +496,7 @@ export const createDeckTentacle = (
   if (name.length === 0) {
     return { ok: false, error: "Name is required" };
   }
-  if (name.includes("..") || name.includes("/")) {
+  if (INVALID_TENTACLE_ID_CHARS.test(name) || name.includes("..")) {
     return { ok: false, error: "Name contains invalid characters" };
   }
 
@@ -547,9 +556,8 @@ export const updateDeckTentacleSuggestedSkills = (
   suggestedSkills: string[],
   projectStateDir?: string,
 ): DeckTentacleSummary | null => {
-  if (tentacleId.includes("..") || tentacleId.includes("/")) return null;
-
-  const contextPath = join(workspaceCwd, TENTACLES_DIR, tentacleId, "CONTEXT.md");
+  const contextPath = isSafeTentaclePath(workspaceCwd, tentacleId, "CONTEXT.md");
+  if (!contextPath) return null;
   if (!existsSync(contextPath)) return null;
 
   try {
@@ -575,11 +583,10 @@ export const deleteDeckTentacle = (
   projectStateDir?: string,
 ): { ok: true } | { ok: false; error: string } => {
   const stateDir = projectStateDir ?? join(workspaceCwd, ".octogent");
-  if (tentacleId.includes("..") || tentacleId.includes("/")) {
+  const tentacleDir = isSafeTentaclePath(workspaceCwd, tentacleId);
+  if (!tentacleDir) {
     return { ok: false, error: "Invalid tentacle ID" };
   }
-
-  const tentacleDir = join(workspaceCwd, TENTACLES_DIR, tentacleId);
   if (!existsSync(tentacleDir)) {
     return { ok: false, error: "Tentacle not found" };
   }

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { extname, join } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 
 import type { UsageChartResponse } from "../claudeSessionScanner";
 import type { ClaudeUsageSnapshot } from "../claudeUsage";
@@ -163,13 +163,18 @@ const serveStaticFile = async (
   webDistDir: string,
   pathname: string,
 ): Promise<boolean> => {
-  // Prevent path traversal.
-  const safePath = pathname.replace(/\.\./g, "").replace(/\/+/g, "/");
-  const filePath = join(webDistDir, safePath === "/" ? "index.html" : safePath);
+  // Prevent path traversal: normalize, resolve, and verify containment.
+  const normalized = normalize(pathname.replace(/\0/g, ""));
+  const relativePath = normalized.startsWith(sep) ? normalized.slice(1) : normalized;
+  const filePath = resolve(webDistDir, relativePath);
+  if (!filePath.startsWith(resolve(webDistDir))) {
+    return false;
+  }
+  const targetPath = filePath === resolve(webDistDir) ? join(webDistDir, "index.html") : filePath;
 
   try {
-    const content = await readFile(filePath);
-    const ext = extname(filePath);
+    const content = await readFile(targetPath);
+    const ext = extname(targetPath);
     const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
     response.writeHead(200, { "Content-Type": contentType });
     response.end(content);
@@ -178,7 +183,7 @@ const serveStaticFile = async (
     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
     if (code !== "ENOENT") {
       console.error(
-        `[API] Static file error: ${filePath}`,
+        `[API] Static file error: ${targetPath}`,
         error instanceof Error ? error.message : error,
       );
     }
