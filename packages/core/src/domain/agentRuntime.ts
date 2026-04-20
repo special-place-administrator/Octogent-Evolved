@@ -22,4 +22,4 @@ export type TerminalAgentProvider = "codex" | "claude-code";
 export const TERMINAL_AGENT_PROVIDERS: TerminalAgentProvider[] = ["codex", "claude-code"];
 
 export const isTerminalAgentProvider = (value: unknown): value is TerminalAgentProvider =>
-  typeof value === "string" && TERMINAL_AGENT_PROVIDERS.includes(value as TerminalAgentProvider);
+  typeof value === "string" && (TERMINAL_AGENT_PROVIDERS as readonly string[]).includes(value);

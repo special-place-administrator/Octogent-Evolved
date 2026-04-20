@@ -5,6 +5,6 @@ export class InMemoryTerminalSnapshotReader implements TerminalSnapshotReader {
   constructor(private readonly snapshots: TerminalSnapshot[]) {}
 
   async listTerminalSnapshots(): Promise<TerminalSnapshot[]> {
-    return this.snapshots;
+    return this.snapshots.slice();
   }
 }

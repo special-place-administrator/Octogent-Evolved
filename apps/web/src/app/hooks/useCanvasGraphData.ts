@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { DeckTentacleSummary } from "@octogent/core";
+import type { DeckTentacleSummary, OctopusExpression } from "@octogent/core";
 import { buildConversationsUrl, buildDeckTentaclesUrl } from "../../runtime/runtimeEndpoints";
 import type { GraphEdge, GraphNode } from "../canvas/types";
 import { normalizeConversationSessionSummary } from "../conversationNormalizers";
@@ -121,7 +121,11 @@ const normalizeDeckTentacleSummary = (value: unknown): DeckTentacleSummary | nul
     color: typeof record.color === "string" ? record.color : null,
     octopus: {
       animation: typeof octopusRecord?.animation === "string" ? octopusRecord.animation : null,
-      expression: typeof octopusRecord?.expression === "string" ? octopusRecord.expression : null,
+      expression:
+        typeof octopusRecord?.expression === "string" &&
+        ["normal", "happy", "angry", "surprised"].includes(octopusRecord.expression)
+          ? (octopusRecord.expression as OctopusExpression)
+          : null,
       accessory: typeof octopusRecord?.accessory === "string" ? octopusRecord.accessory : null,
       hairColor: typeof octopusRecord?.hairColor === "string" ? octopusRecord.hairColor : null,
     },

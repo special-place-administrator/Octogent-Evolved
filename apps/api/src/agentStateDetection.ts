@@ -18,6 +18,8 @@ const WAITING_FOR_USER_PATTERNS = [
   /shall i/i,
 ] as const;
 
+const PROCESSING_PATTERNS = [/esc to interrupt/i] as const;
+
 const DEFAULT_MAX_BUFFER_LENGTH = 256;
 const DEFAULT_IDLE_AFTER_MS = 1_600;
 
@@ -196,7 +198,15 @@ export class AgentStateTracker {
       return this.enterWaiting("waiting_for_user");
     }
 
-    return this.enterProcessing(now);
+    if (hasPatternSignal(combined, chunkStartIndex, PROCESSING_PATTERNS)) {
+      return this.enterProcessing(now);
+    }
+
+    if (this.state === "processing") {
+      return null;
+    }
+
+    return null;
   }
 
   poll(now = Date.now()): AgentRuntimeState | null {

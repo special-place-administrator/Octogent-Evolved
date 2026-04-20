@@ -1,7 +1,11 @@
 import type { TerminalSnapshotReader } from "../ports/TerminalSnapshotReader";
 
-const byCreatedAtAscending = (a: string, b: string): number =>
-  new Date(a).getTime() - new Date(b).getTime();
+const byCreatedAtAscending = (a: string, b: string): number => {
+  const aTime = new Date(a).getTime();
+  const bTime = new Date(b).getTime();
+  if (Number.isNaN(aTime) || Number.isNaN(bTime)) return 0;
+  return aTime - bTime;
+};
 
 export const buildTerminalList = async (
   reader: TerminalSnapshotReader,

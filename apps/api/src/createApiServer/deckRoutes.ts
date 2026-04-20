@@ -25,7 +25,6 @@ import {
 } from "./routeHelpers";
 import { parseTerminalAgentProvider, parseTerminalWorkspaceMode } from "./terminalParsers";
 
-
 const buildSingleTodoWorkerPrompt = async ({
   promptsDir,
   workspaceCwd,
@@ -607,7 +606,8 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
       response,
       400,
       {
-        error: "No free todo items available — all incomplete items are already claimed by active workers.",
+        error:
+          "No free todo items available — all incomplete items are already claimed by active workers.",
         claimedIndices: [...claimedIndices],
       },
       corsOrigin,
@@ -618,7 +618,8 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
   // Worker count: bounded by min(body.maxWorkers, MAX_CHILDREN_PER_PARENT, targetItems.length).
   // UI exposes maxWorkers as an explicit user control; MAX_CHILDREN_PER_PARENT
   // is the runtime hard cap.
-  const rawMaxWorkers = typeof body.maxWorkers === "number" ? Math.floor(body.maxWorkers) : undefined;
+  const rawMaxWorkers =
+    typeof body.maxWorkers === "number" ? Math.floor(body.maxWorkers) : undefined;
   const effectiveMax =
     rawMaxWorkers !== undefined && rawMaxWorkers > 0
       ? Math.min(rawMaxWorkers, MAX_CHILDREN_PER_PARENT)
@@ -694,11 +695,11 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
   const buildCompletionStrategySection = (baseBranch: string): string =>
     workerWorkspaceMode === "worktree"
       ? [
-          `**Parameters for this swarm:**`,
+          "**Parameters for this swarm:**",
           "",
           `- Base branch: \`${baseBranch}\``,
           `- Integration branch: \`octogent_integration_${tentacleId}\``,
-          `- Worker branches:`,
+          "- Worker branches:",
           ...workers.map(
             (w) => `  - \`octogent/${w.terminalId}\` — item #${w.todoIndex}: ${w.todoText}`,
           ),
@@ -714,8 +715,8 @@ export const handleDeckTentacleSwarmRoute: ApiRouteHandler = async (
           "",
           "2. **Review each mergeable worker branch** before merging it:",
           "   ```bash",
-          `   git log <worker-branch> --oneline`,
-          `   git show <worker-branch> --stat`,
+          "   git log <worker-branch> --oneline",
+          "   git show <worker-branch> --stat",
           `   git diff ${baseBranch}..<worker-branch>`,
           "   ```",
           `   A worker branch is "mergeable" when it is ahead of \`${baseBranch}\`, its worktree is clean, and its verification commands (per CONTEXT.md) pass. You do not need a DONE channel message — the commit IS the signal.`,
