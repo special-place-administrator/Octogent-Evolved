@@ -1,8 +1,6 @@
 <div align="center">
 
-<img width="1500" height="500" alt="Octogent header" src="./static/images/octogent-header.png" />
-<br/>
-<br/>
+<img width="1500" height="500" alt="Octogent header" src="logo02.png" />
 
 <strong>too many terminals, not enough tentacles</strong>
 <br />
