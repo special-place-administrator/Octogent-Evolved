@@ -581,3 +581,245 @@ describe("readClaudeUsageSnapshot", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("retry and grace-period behavior", () => {
+  beforeEach(() => {
+    resetCliSession();
+    invalidateUsageCache();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const baseDeps = {
+    spawnCliUsage: noCliPty,
+    readCredentialsJson: async () => validCredentials(),
+  };
+
+  it("includes retry-after seconds in message when 429 carries Retry-After header and body has no message", async () => {
+    // When the response body carries no parseable error message, the fallback
+    // string is used and the Retry-After suffix is appended.
+    const snapshot = await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: async () =>
+        new Response("", {
+          status: 429,
+          headers: { "retry-after": "42" },
+        }),
+    });
+
+    expect(snapshot.status).toBe("unavailable");
+    expect(snapshot.message).toMatch(/retry after 42s/i);
+  });
+
+  it("serves stale cached snapshot when OAuth returns a 500 error", async () => {
+    // Use fake timers to control Date.now() without clearing cachedSnapshot.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-03T12:00:00.000Z"));
+
+    // Prime the cache.
+    await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: async () =>
+        new Response(usageResponseBody, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    // Advance past CACHE_TTL_MS (300 000 ms) so a background refresh is triggered,
+    // but cachedSnapshot is still populated (not cleared).
+    vi.advanceTimersByTime(301_000);
+
+    const snapshot = await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T17:01:00.000Z"),
+      fetchImpl: async () =>
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    });
+
+    expect(snapshot.status).toBe("ok");
+    expect(snapshot.source).toBe("oauth-api");
+    expect(snapshot.primaryUsedPercent).toBe(14);
+  });
+
+  it("serves stale cached snapshot when fetch throws a network error", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-03T12:00:00.000Z"));
+
+    // Prime the cache.
+    await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: async () =>
+        new Response(usageResponseBody, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    vi.advanceTimersByTime(301_000);
+
+    const snapshot = await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T17:01:00.000Z"),
+      fetchImpl: async () => {
+        throw new Error("network unreachable");
+      },
+    });
+
+    expect(snapshot.status).toBe("ok");
+    expect(snapshot.primaryUsedPercent).toBe(14);
+  });
+
+  it("does NOT serve stale cache when credentials are missing (ENOENT)", async () => {
+    // Prime the cache, then immediately try with missing credentials.
+    // Since credentials fail before reaching the API, the stale-serve
+    // branch in refreshClaudeUsageSnapshot is never reached.
+    await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: async () =>
+        new Response(usageResponseBody, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    invalidateUsageCache();
+
+    const snapshot = await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:10:00.000Z"),
+      readCredentialsJson: async () => {
+        const error = new Error("not found");
+        Object.assign(error, { code: "ENOENT" });
+        throw error;
+      },
+    });
+
+    expect(snapshot.status).toBe("unavailable");
+    expect(snapshot.message).toMatch(/credentials not found/i);
+  });
+
+  it("does NOT serve stale cache when OAuth token is missing", async () => {
+    await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: async () =>
+        new Response(usageResponseBody, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    invalidateUsageCache();
+
+    const snapshot = await readClaudeUsageSnapshot({
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:10:00.000Z"),
+      readCredentialsJson: async () => ({ claudeAiOauth: { scopes: ["user:profile"] } }),
+    });
+
+    expect(snapshot.status).toBe("unavailable");
+    expect(snapshot.message).toMatch(/access token.*missing/i);
+  });
+
+  it("concurrent cold-cache reads share a single fetch (refreshInFlight dedup)", async () => {
+    let fetchCallCount = 0;
+    const slowFetch = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        await new Promise<Response>((resolve) => {
+          fetchCallCount++;
+          setTimeout(() => {
+            resolve(
+              new Response(usageResponseBody, {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          }, 30);
+        }),
+    );
+
+    const deps = {
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: slowFetch,
+    };
+
+    // Fire two concurrent reads before either resolves.
+    const [first, second] = await Promise.all([
+      readClaudeUsageSnapshot(deps),
+      readClaudeUsageSnapshot(deps),
+    ]);
+
+    expect(first.status).toBe("ok");
+    expect(second.status).toBe("ok");
+    expect(fetchCallCount).toBe(1);
+  });
+
+  it("returns cached snapshot within TTL without re-fetching", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(usageResponseBody, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const deps = {
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: fetchMock,
+    };
+
+    // First call populates the cache.
+    const first = await readClaudeUsageSnapshot(deps);
+    expect(first.status).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Second call within TTL — no new fetch.
+    const second = await readClaudeUsageSnapshot(deps);
+    expect(second.status).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers a fresh fetch after cache TTL expires (via invalidateUsageCache)", async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => {
+      callCount++;
+      return new Response(
+        JSON.stringify({
+          plan_type: "pro",
+          five_hour: { used_percent: callCount * 10, reset_at: null },
+          seven_day: { used_percent: 50, reset_at: null },
+          seven_day_sonnet: { used_percent: 30, reset_at: null },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const deps = {
+      ...baseDeps,
+      now: () => new Date("2026-03-03T12:00:00.000Z"),
+      fetchImpl: fetchMock,
+    };
+
+    const first = await readClaudeUsageSnapshot(deps);
+    expect(first.primaryUsedPercent).toBe(10);
+
+    // Simulate TTL expiry by invalidating the cache.
+    invalidateUsageCache();
+
+    const second = await readClaudeUsageSnapshot(deps);
+    expect(second.primaryUsedPercent).toBe(20);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
