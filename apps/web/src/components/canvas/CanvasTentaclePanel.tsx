@@ -78,6 +78,7 @@ type CanvasTentaclePanelProps = {
   panelRef?: Ref<HTMLDivElement> | undefined;
   tentacle: DeckTentacleSummary | null;
   sessions: ConversationSessionSummary[];
+  onLaunchPlanner?: (() => void) | undefined;
   onCreateAgent?: ((tentacleId: string, workspaceMode?: TentacleWorkspaceMode) => void) | undefined;
   onSolveTodoItem?: ((tentacleId: string, itemIndex: number) => void) | undefined;
   onSpawnSwarm?:
@@ -116,6 +117,7 @@ export const CanvasTentaclePanel = ({
   panelRef,
   tentacle,
   sessions,
+  onLaunchPlanner,
   onCreateAgent,
   onSolveTodoItem,
   onSpawnSwarm,
@@ -291,6 +293,15 @@ export const CanvasTentaclePanel = ({
         <div className="detail-section">
           <div className="detail-section-title">Actions</div>
           <div className="detail-actions">
+            {node.type === "octoboss" && (
+              <button
+                type="button"
+                className="detail-action-btn"
+                onClick={() => onLaunchPlanner?.()}
+              >
+                ✦ Launch Planner
+              </button>
+            )}
             <button
               type="button"
               className="detail-action-btn"

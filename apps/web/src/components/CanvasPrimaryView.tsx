@@ -1224,6 +1224,11 @@ export const CanvasPrimaryView = ({
                 sessions={sessionsByTentacleId.get(node.tentacleId) ?? []}
                 onClose={() => handleCloseTentacle(nodeId)}
                 onFocus={() => setSelectedNodeId(nodeId)}
+                onLaunchPlanner={
+                  node.type === "octoboss"
+                    ? () => handleOctobossAction("launch-planner")
+                    : undefined
+                }
                 onCreateAgent={(tentacleId, workspaceMode) => {
                   handleCreateAgent(tentacleId, workspaceMode);
                 }}
