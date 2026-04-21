@@ -3,8 +3,6 @@
 /.codex
 /context
 /.octogent
-!/.octogent/tentacles
-!/.octogent/codebase-map.md
 /node_modules
 /dist
 /coverage
@@ -14,8 +12,6 @@
 **/coverage/
 
 .octogent
-!.octogent/tentacles
-!.octogent/codebase-map.md
 
 # SymForge runtime artifacts
 .symforge/

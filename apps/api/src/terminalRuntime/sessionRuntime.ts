@@ -398,6 +398,7 @@ export const createSessionRuntime = ({
         }
         appendDebugLog(session, `effort-auto session=${sessionId} path=legacy`);
         session.pty.write("/effort auto\r");
+        session.pty.write("/model opusplan\r");
       }, INITIAL_PROMPT_DELAY_MS);
     }
 
@@ -481,6 +482,23 @@ export const createSessionRuntime = ({
       // /effort auto may have succeeded silently on versions that don't
       // fire idle_prompt for slash commands. Proceed anyway after a
       // small render buffer.
+      await new Promise<void>((resolve) => setTimeout(resolve, CLAUDE_SLASH_COMMAND_DELAY_MS));
+    }
+
+    // Phase: /model opusplan to select the model.
+    appendDebugLog(session, `model-opusplan session=${sessionId} path=hook`);
+    session.pty.write("/model opusplan\r");
+    const idleBaseline2 = session.idlePromptCount ?? 0;
+    const modelResult = await waitForCounterIncrement(
+      sessionId,
+      session,
+      [{ key: "idlePromptCount", baseline: idleBaseline2, label: "idle" }],
+      HOOK_EFFORT_IDLE_TIMEOUT_MS,
+    );
+    if (modelResult === "aborted") {
+      return;
+    }
+    if (modelResult === "timeout") {
       await new Promise<void>((resolve) => setTimeout(resolve, CLAUDE_SLASH_COMMAND_DELAY_MS));
     }
 
